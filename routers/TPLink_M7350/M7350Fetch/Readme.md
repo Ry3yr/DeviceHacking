@@ -1,5 +1,0 @@
-# Device Hacking
-
-*A lil collection of lil device hacks and apicall reverse engineers.*
-
-* [TPLink M7350](https://codeberg.org/alceawisteria/DeviceHacking/src/branch/main/routers/TPLink_M7350) (2025/12/18) [Features: Fetch: SMS/Syslog/microSD_Capacity/Info]
