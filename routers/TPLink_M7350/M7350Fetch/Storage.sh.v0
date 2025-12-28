@@ -1,0 +1,38 @@
+#!/bin/bash
+HOST="192.168.0.1"
+
+# 1. Get Nonce
+NONCE_RESPONSE=$(curl -s -X POST \
+  -d '{"module":"authenticator","action":0}' \
+  "http://$HOST/cgi-bin/auth_cgi")
+
+NONCE=$(echo "$NONCE_RESPONSE" | sed -n 's/.*"nonce":[[:space:]]*"\([^"]*\)".*/\1/p')
+
+# 2. Login
+read -s -p "Enter Admin Password: " PASSWORD
+echo >&2 
+DIGEST=$(echo -n "${PASSWORD}:${NONCE}" | md5sum | cut -d' ' -f1)
+
+LOGIN_RESPONSE=$(curl -s -X POST \
+  -d "{\"module\":\"authenticator\",\"action\":1,\"digest\":\"$DIGEST\"}" \
+  "http://$HOST/cgi-bin/auth_cgi")
+
+TOKEN=$(echo "$LOGIN_RESPONSE" | sed -n 's/.*"token":[[:space:]]*"\([^"]*\)".*/\1/p')
+
+if [ -z "$TOKEN" ]; then echo "Login failed"; exit 1; fi
+
+echo -e "\n--- STORAGE DATA (RAW) ---"
+curl -s -X POST \
+  -H "Cookie: tpweb_token=$TOKEN" \
+  -d "{\"token\":\"$TOKEN\",\"module\":\"storageShare\",\"action\":0}" \
+  "http://$HOST/cgi-bin/web_cgi"
+
+echo -e "\n\n--- SYSTEM STATUS (RAW) ---"
+curl -s -X POST \
+  -H "Cookie: tpweb_token=$TOKEN" \
+  -d "{\"token\":\"$TOKEN\",\"module\":\"status\",\"action\":0}" \
+  "http://$HOST/cgi-bin/web_cgi"
+
+echo -e "\n\n--- END ---"
+echo "Done."
+read -n1 -r -p "Press any key to exit..."
