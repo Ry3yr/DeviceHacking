@@ -1,6 +1,7 @@
 #!/bin/bash
-# TP-Link M7350 Minimal SMS Parser - MATCHED TO YOUR JSON
+# TP-Link M7350 Minimal SMS Parser - HARDCODED PASSWORD VERSION
 HOST="192.168.0.1"
+PASSWORD="password"  # Hardcoded password - CHANGE THIS!
 
 # 1. Get Nonce (Silent)
 NONCE_RESPONSE=$(curl -s -X POST \
@@ -10,11 +11,12 @@ NONCE_RESPONSE=$(curl -s -X POST \
 
 NONCE=$(echo "$NONCE_RESPONSE" | sed -n 's/.*"nonce":[[:space:]]*"\([^"]*\)".*/\1/p')
 
-if [ -z "$NONCE" ]; then exit 1; fi
+if [ -z "$NONCE" ]; then 
+    echo "Failed to get nonce" >&2
+    exit 1
+fi
 
 # 2. Login (Silent)
-read -s -p "Enter password: " PASSWORD
-echo >&2 
 DIGEST=$(echo -n "${PASSWORD}:${NONCE}" | md5sum | cut -d' ' -f1)
 
 LOGIN_RESPONSE=$(curl -s -X POST \
@@ -24,7 +26,10 @@ LOGIN_RESPONSE=$(curl -s -X POST \
 
 TOKEN=$(echo "$LOGIN_RESPONSE" | sed -n 's/.*"token":[[:space:]]*"\([^"]*\)".*/\1/p')
 
-if [ -z "$TOKEN" ]; then exit 1; fi
+if [ -z "$TOKEN" ]; then
+    echo "Login failed - check password" >&2
+    exit 1
+fi
 
 # 3. Fetch SMS
 SMS_JSON=$(curl -s -X POST \
@@ -46,6 +51,7 @@ echo "$SMS_JSON" | sed 's/[{},]/ \n/g' | sed 's/"//g' | awk '
         print "-------------------------"
     }
 '
+
 
 echo -e "\nDone."
 read -n1 -r -p "Press any key to exit..."
