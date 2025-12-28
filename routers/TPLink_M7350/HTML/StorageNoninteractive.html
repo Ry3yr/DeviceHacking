@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>M7350 Status Monitor - Auto Run</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Courier New', monospace; 
+            background: #121212; 
+            color: #00ff00; 
+            padding: 20px; 
+        }
+        .container { 
+            max-width: 800px; 
+            margin: auto; 
+            border: 1px solid #00ff00; 
+            padding: 20px; 
+            box-shadow: 0 0 15px #00ff0033; 
+        }
+        .handshake { 
+            color: #888; 
+            font-size: 0.8em; 
+            margin-bottom: 20px; 
+            border-bottom: 1px dashed #444; 
+            padding-bottom: 10px; 
+        }
+        .status-section { 
+            border: 1px solid #333; 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            background: #1a1a1a; 
+        }
+        .device-header {
+            color: #00aaff;
+            font-size: 1.2em;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .status-item { 
+            margin: 8px 0; 
+            padding: 5px 0; 
+        }
+        .label { 
+            color: #0088ff; 
+            font-weight: bold; 
+            display: inline-block;
+            width: 150px;
+        }
+        .value { 
+            color: #fff; 
+        }
+        .sd-card-info {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px dashed #333;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 3px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00aa00, #00ff00);
+            transition: width 0.3s ease;
+        }
+        #status { 
+            color: #ff8800; 
+            margin: 10px 0; 
+        }
+        .pass-info { 
+            font-size: 0.8em; 
+            color: #666; 
+            margin-top: 5px; 
+        }
+        .auto-note { 
+            color: #ffff00; 
+            font-size: 0.9em; 
+            margin-bottom: 10px; 
+            padding: 5px; 
+            background: #222; 
+        }
+        .unit {
+            color: #888;
+            font-size: 0.9em;
+        }
+        .raw-data {
+            font-size: 0.7em;
+            color: #444;
+            background: #111;
+            padding: 10px;
+            margin-top: 20px;
+            border: 1px solid #333;
+            max-height: 200px;
+            overflow: auto;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body onload="fetchStatus()">
+    <div class="container">
+        <h3>M7350 Device Status Monitor</h3>
+        
+        <div class="auto-note">✓ Auto-running status check on page load...</div>
+        
+        <div class="handshake">
+            <div class="pass-info">Reading credentials from <i>password.txt</i>...</div>
+            <div style="margin-top:10px;">
+                Nonce: <span id="n-out" style="color:#d2a8ff">---</span> | Token: <span id="t-out" style="color:#d2a8ff">---</span>
+            </div>
+        </div>
+
+        <div id="status">Initializing...</div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        async function fetchStatus() {
+            const host = "192.168.0.1";
+            const status = document.getElementById('status');
+            const output = document.getElementById('output');
+
+            try {
+                status.innerText = "Reading local password.txt...";
+                const passRes = await fetch('password.txt');
+                if (!passRes.ok) throw new Error("Could not find password.txt in directory.");
+                const password = (await passRes.text()).trim();
+
+                status.innerText = "Connecting to router...";
+                
+                const nRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                    body: JSON.stringify({module: "authenticator", action: 0})
+                });
+                const { nonce } = await nRes.json();
+                document.getElementById('n-out').innerText = nonce;
+
+                const digest = CryptoJS.MD5(`${password}:${nonce}`).toString();
+                const lRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                    body: JSON.stringify({module: "authenticator", action: 1, digest: digest})
+                });
+                const { token } = await lRes.json();
+                document.getElementById('t-out').innerText = token;
+
+                if (!token) throw new Error("Login Failed - check password.txt content.");
+
+                status.innerText = "Fetching device status...";
+                const sRes = await fetch(`http://${host}/cgi-bin/web_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                    },
+                    body: JSON.stringify({
+                        token: token,
+                        module: "status",
+                        action: 0
+                    })
+                });
+
+                const rawData = await sRes.text();
+                
+                output.innerHTML = "";
+                
+                const debugDiv = document.createElement('div');
+                debugDiv.className = 'raw-data';
+                debugDiv.textContent = "Raw response: " + rawData;
+                output.appendChild(debugDiv);
+                
+                const cleanedData = rawData
+                    .replace(/["{}]/g, '')  // Remove quotes and braces
+                    .replace(/\t/g, ' ')    // Replace tabs with spaces
+                    .replace(/,/g, '\n')    // Replace commas with newlines
+                    .split('\n');
+                
+                const data = {};
+                cleanedData.forEach(line => {
+                    const parts = line.split(':');
+                    if (parts.length >= 2) {
+                        const key = parts[0].trim();
+                        const value = parts.slice(1).join(':').trim();
+                        data[key] = value;
+                    }
+                });
+                
+                if (Object.keys(data).length > 0) {
+                    const model = data.model || "Unknown";
+                    const ip = data.ipv4 || "N/A";
+                    const battery = data.voltage || "0";
+                    const sdStatus = data.status === "1" ? "Ready" : "Empty/Not Found";
+                    
+                    const totalKB = parseFloat(data.volume) || 0;
+                    const usedKB = parseFloat(data.used) || 0;
+                    const leftKB = parseFloat(data.left) || 0;
+                    
+                    const totalGB = totalKB / 1048576;
+                    const usedGB = usedKB / 1048576;
+                    const freeGB = leftKB / 1048576;
+                    const usedPercentage = totalGB > 0 ? (usedGB / totalGB) * 100 : 0;
+                    
+                    const div = document.createElement('div');
+                    div.className = 'status-section';
+                    div.innerHTML = `
+                        <div class="device-header">=== DEVICE: ${model} ===</div>
+                        
+                        <div class="status-item">
+                            <span class="label">IP Address:</span>
+                            <span class="value">${ip}</span>
+                        </div>
+                        
+                        <div class="status-item">
+                            <span class="label">Battery:</span>
+                            <span class="value">${battery}%</span>
+                        </div>
+                        
+                        <div class="sd-card-info">
+                    `;
+                    
+                    if (totalGB > 0) {
+                        div.innerHTML += `
+                            <div class="status-item">
+                                <span class="label">SD Card Status:</span>
+                                <span class="value">${sdStatus}</span>
+                            </div>
+                            
+                            <div class="status-item">
+                                <span class="label">Total Size:</span>
+                                <span class="value">${totalGB.toFixed(2)} <span class="unit">GB</span></span>
+                            </div>
+                            
+                            <div class="status-item">
+                                <span class="label">Used Space:</span>
+                                <span class="value">${usedGB.toFixed(2)} <span class="unit">GB</span> (${usedPercentage.toFixed(1)}%)</span>
+                            </div>
+                            
+                            <div class="status-item">
+                                <span class="label">Free Space:</span>
+                                <span class="value">${freeGB.toFixed(2)} <span class="unit">GB</span></span>
+                            </div>
+                            
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${usedPercentage}%"></div>
+                            </div>
+                        `;
+                    } else {
+                        div.innerHTML += `
+                            <div class="status-item">
+                                <span class="label">SD Card:</span>
+                                <span class="value">Not Found or Unmounted</span>
+                            </div>
+                        `;
+                    }
+                    
+                    output.insertBefore(div, debugDiv);
+                    status.innerText = "✓ Status fetched successfully";
+                    
+                    const doneDiv = document.createElement('div');
+                    doneDiv.style.marginTop = "20px";
+                    doneDiv.style.color = "#888";
+                    doneDiv.style.fontSize = "0.9em";
+                    doneDiv.innerHTML = "Done.";
+                    output.appendChild(doneDiv);
+                    
+                } else {
+                    status.innerText = "No status data received or parsing failed";
+                }
+
+            } catch (e) {
+                status.innerText = "Error: " + e.message;
+                console.error(e);
+            }
+        }
+    </script>
+</body>
+</html>

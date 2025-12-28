@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>M7350 System Log Fetcher - Multi-Page</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Courier New', monospace; 
+            background: #121212; 
+            color: #00ff00; 
+            padding: 20px; 
+        }
+        .container { 
+            max-width: 1000px; 
+            margin: auto; 
+            border: 1px solid #00ff00; 
+            padding: 20px; 
+            box-shadow: 0 0 15px #00ff0033; 
+        }
+        .handshake { 
+            color: #888; 
+            font-size: 0.8em; 
+            margin-bottom: 20px; 
+            border-bottom: 1px dashed #444; 
+            padding-bottom: 10px; 
+        }
+        .log-section { 
+            border: 1px solid #333; 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            background: #1a1a1a; 
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .log-header {
+            color: #00aaff;
+            font-size: 1.2em;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            position: sticky;
+            top: 0;
+            background: #1a1a1a;
+            z-index: 10;
+        }
+        .log-entry { 
+            margin: 8px 0; 
+            padding: 10px; 
+            border-bottom: 1px solid #222;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        .log-time {
+            color: #00ffaa;
+            font-weight: bold;
+        }
+        .log-type {
+            color: #ffaa00;
+            font-weight: bold;
+            margin: 0 5px;
+        }
+        .log-content {
+            color: #ffffff;
+            margin-top: 5px;
+        }
+        .page-header {
+            color: #aa55ff;
+            margin: 20px 0 10px 0;
+            padding-bottom: 5px;
+            border-bottom: 2px dashed #444;
+            font-size: 1.1em;
+        }
+        #status { 
+            color: #ff8800; 
+            margin: 10px 0; 
+            font-weight: bold;
+        }
+        .pass-info { 
+            font-size: 0.8em; 
+            color: #666; 
+            margin-top: 5px; 
+        }
+        .auto-note { 
+            color: #ffff00; 
+            font-size: 0.9em; 
+            margin-bottom: 10px; 
+            padding: 5px; 
+            background: #222; 
+        }
+        .controls {
+            margin: 15px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .controls button {
+            background: #222;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 8px 15px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            transition: all 0.3s;
+        }
+        .controls button:hover {
+            background: #00ff00;
+            color: #121212;
+        }
+        .controls select {
+            background: #222;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 8px;
+            font-family: 'Courier New', monospace;
+        }
+        .loading {
+            color: #ffff00;
+            font-style: italic;
+        }
+        .error-log {
+            color: #ff5555;
+            border: 1px solid #ff5555;
+            padding: 10px;
+            background: #2a1111;
+            margin: 10px 0;
+        }
+        .stats {
+            color: #888;
+            font-size: 0.9em;
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px dashed #444;
+        }
+    </style>
+</head>
+<body onload="initialize()">
+    <div class="container">
+        <h3>TP-Link M7350 System Log Fetcher (Multi-Page)</h3>
+        
+        <div class="auto-note">✓ Auto-running on page load - Fetching 10 pages of system logs...</div>
+        
+        <div class="handshake">
+            <div class="pass-info">Reading credentials from <i>password.txt</i>...</div>
+            <div style="margin-top:10px;">
+                Nonce: <span id="n-out" style="color:#d2a8ff">---</span> | Token: <span id="t-out" style="color:#d2a8ff">---</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button onclick="fetchLogs()">Refresh Logs</button>
+            <button onclick="clearLogs()">Clear Display</button>
+            <select id="pageCount" onchange="updatePageCount()">
+                <option value="5">5 Pages</option>
+                <option value="10" selected>10 Pages</option>
+                <option value="15">15 Pages</option>
+                <option value="20">20 Pages</option>
+            </select>
+            <span style="color:#888; margin-left: auto; font-size: 0.9em;">
+                Showing: <span id="currentPage">1</span>/<span id="totalPages">10</span>
+            </span>
+        </div>
+
+        <div id="status">Initializing...</div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        let currentToken = '';
+        let currentNonce = '';
+        const host = "192.168.0.1";
+        let totalPages = 10;
+        let currentPage = 1;
+
+        async function initialize() {
+            totalPages = parseInt(document.getElementById('pageCount').value);
+            document.getElementById('totalPages').textContent = totalPages;
+            await fetchLogs();
+        }
+
+        function updatePageCount() {
+            totalPages = parseInt(document.getElementById('pageCount').value);
+            document.getElementById('totalPages').textContent = totalPages;
+        }
+
+        async function getPassword() {
+            const passRes = await fetch('password.txt');
+            if (!passRes.ok) throw new Error("Could not find password.txt in directory.");
+            return (await passRes.text()).trim();
+        }
+
+        async function authenticate() {
+            const status = document.getElementById('status');
+            const password = await getPassword();
+
+            status.innerHTML = '<span class="loading">Getting nonce from router...</span>';
+            const nRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'Referer': `http://${host}/login.html`
+                },
+                body: JSON.stringify({module: "authenticator", action: 0})
+            });
+            
+            const nData = await nRes.json();
+            currentNonce = nData.nonce;
+            document.getElementById('n-out').innerText = currentNonce;
+
+            if (!currentNonce) throw new Error("Failed to get nonce from router");
+
+            status.innerHTML = '<span class="loading">Logging in with stored credentials...</span>';
+            const digest = CryptoJS.MD5(`${password}:${currentNonce}`).toString();
+            const lRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'Referer': `http://${host}/login.html`
+                },
+                body: JSON.stringify({module: "authenticator", action: 1, digest: digest})
+            });
+            
+            const lData = await lRes.json();
+            currentToken = lData.token;
+            document.getElementById('t-out').innerText = currentToken;
+
+            if (!currentToken) throw new Error("Login Failed - check password.txt content.");
+            
+            status.innerHTML = '<span style="color:#00ff00">✓ Login successful</span>';
+            return true;
+        }
+
+        async function fetchLogs() {
+            const status = document.getElementById('status');
+            const output = document.getElementById('output');
+
+            try {
+                output.innerHTML = '<div class="loading">Starting log fetch...</div>';
+                
+                // Authenticate first if needed
+                if (!currentToken) {
+                    await authenticate();
+                }
+
+                status.innerHTML = `<span class="loading">Fetching ${totalPages} pages of logs...</span>`;
+                
+                output.innerHTML = '';
+                const logContainer = document.createElement('div');
+                logContainer.className = 'log-section';
+                logContainer.innerHTML = '<div class="log-header">=== SYSTEM LOGS ===</div>';
+                output.appendChild(logContainer);
+
+                let totalLogs = 0;
+                const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+                for (let i = 1; i <= totalPages; i++) {
+                    currentPage = i;
+                    document.getElementById('currentPage').textContent = currentPage;
+                    
+                    status.innerHTML = `<span class="loading">Fetching page ${i}/${totalPages}...</span>`;
+                    
+                    try {
+                        const logRes = await fetch(`http://${host}/cgi-bin/web_cgi`, {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'Referer': `http://${host}/settings.html`
+                            },
+                            body: JSON.stringify({
+                                token: currentToken,
+                                module: "log",
+                                action: 0,
+                                amountPerPage: 20,
+                                pageNumber: i,
+                                type: 0,
+                                level: 0
+                            })
+                        });
+
+                        const rawData = await logRes.text();
+                        
+                        if (rawData) {
+                            // Add page header
+                            const pageHeader = document.createElement('div');
+                            pageHeader.className = 'page-header';
+                            pageHeader.textContent = `--- Page ${i} ---`;
+                            logContainer.appendChild(pageHeader);
+                            
+                            // Parse JSON response
+                            try {
+                                const logData = JSON.parse(rawData);
+                                const logList = logData.logList || [];
+                                
+                                if (logList.length > 0) {
+                                    totalLogs += logList.length;
+                                    
+                                    logList.forEach(log => {
+                                        const logEntry = document.createElement('div');
+                                        logEntry.className = 'log-entry';
+                                        
+                                        const time = log.time || 'Unknown time';
+                                        const type = log.type || 'Unknown';
+                                        const content = log.content || 'No content';
+                                        
+                                        logEntry.innerHTML = `
+                                            <div>
+                                                <span class="log-time">[${time}]</span>
+                                                <span class="log-type">(${type})</span>
+                                            </div>
+                                            <div class="log-content">${content}</div>
+                                        `;
+                                        
+                                        logContainer.appendChild(logEntry);
+                                    });
+                                } else {
+                                    const emptyEntry = document.createElement('div');
+                                    emptyEntry.className = 'log-entry';
+                                    emptyEntry.style.color = '#888';
+                                    emptyEntry.style.fontStyle = 'italic';
+                                    emptyEntry.textContent = 'No logs found on this page';
+                                    logContainer.appendChild(emptyEntry);
+                                }
+                            } catch (parseError) {
+                                const errorEntry = document.createElement('div');
+                                errorEntry.className = 'error-log';
+                                errorEntry.textContent = `Failed to parse page ${i}: ${parseError.message}`;
+                                logContainer.appendChild(errorEntry);
+                            }
+                        }
+                        
+                        await delay(500);
+                        
+                    } catch (pageError) {
+                        const errorEntry = document.createElement('div');
+                        errorEntry.className = 'error-log';
+                        errorEntry.textContent = `Error fetching page ${i}: ${pageError.message}`;
+                        logContainer.appendChild(errorEntry);
+                    }
+                }
+                
+                const statsDiv = document.createElement('div');
+                statsDiv.className = 'stats';
+                statsDiv.innerHTML = `✓ Completed. Fetched ${totalLogs} log entries from ${totalPages} pages.`;
+                output.appendChild(statsDiv);
+                
+                status.innerHTML = `<span style="color:#00ff00">✓ Log fetch completed successfully</span>`;
+                
+            } catch (e) {
+                status.innerHTML = `<span style="color:#ff5555">Error: ${e.message}</span>`;
+                console.error(e);
+                
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error-log';
+                errorDiv.textContent = `Fatal error: ${e.message}`;
+                output.appendChild(errorDiv);
+            }
+        }
+
+        function clearLogs() {
+            const output = document.getElementById('output');
+            output.innerHTML = '';
+            document.getElementById('currentPage').textContent = '1';
+        }
+    </script>
+</body>
+</html>
