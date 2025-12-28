@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>M7350 SIM Info - Auto Run</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Courier New', monospace; 
+            background: #121212; 
+            color: #00ff00; 
+            padding: 20px; 
+        }
+        .container { 
+            max-width: 800px; 
+            margin: auto; 
+            border: 1px solid #00ff00; 
+            padding: 20px; 
+            box-shadow: 0 0 15px #00ff0033; 
+        }
+        .handshake { 
+            color: #888; 
+            font-size: 0.8em; 
+            margin-bottom: 20px; 
+            border-bottom: 1px dashed #444; 
+            padding-bottom: 10px; 
+        }
+        .sim-info-section { 
+            border: 1px solid #333; 
+            padding: 15px; 
+            margin-bottom: 15px; 
+            background: #1a1a1a; 
+        }
+        .info-header {
+            color: #00aaff;
+            font-size: 1.2em;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .info-item { 
+            margin: 10px 0; 
+            padding: 8px 0; 
+            border-bottom: 1px solid #222;
+        }
+        .label { 
+            color: #0088ff; 
+            font-weight: bold; 
+            display: inline-block;
+            width: 120px;
+        }
+        .value { 
+            color: #fff; 
+            font-family: monospace;
+            font-size: 1.1em;
+        }
+        #status { 
+            color: #ff8800; 
+            margin: 10px 0; 
+        }
+        .pass-info { 
+            font-size: 0.8em; 
+            color: #666; 
+            margin-top: 5px; 
+        }
+        .auto-note { 
+            color: #ffff00; 
+            font-size: 0.9em; 
+            margin-bottom: 10px; 
+            padding: 5px; 
+            background: #222; 
+        }
+        .done-message {
+            margin-top: 20px;
+            padding: 10px;
+            background: #222;
+            color: #888;
+            text-align: center;
+            border: 1px solid #333;
+        }
+        .error {
+            color: #ff5555;
+            border: 1px solid #ff5555;
+            padding: 10px;
+            background: #2a1111;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body onload="fetchSimInfo()">
+    <div class="container">
+        <h3>M7350 SIM Information Reader</h3>
+        
+        <div class="auto-note">✓ Auto-running SIM info check on page load...</div>
+        
+        <div class="handshake">
+            <div class="pass-info">Reading credentials from <i>password.txt</i>...</div>
+            <div style="margin-top:10px;">
+                Nonce: <span id="n-out" style="color:#d2a8ff">---</span> | Token: <span id="t-out" style="color:#d2a8ff">---</span>
+            </div>
+        </div>
+
+        <div id="status">Initializing...</div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        async function fetchSimInfo() {
+            const host = "192.168.0.1";
+            const status = document.getElementById('status');
+            const output = document.getElementById('output');
+
+            try {
+                status.innerText = "Reading local password.txt...";
+                const passRes = await fetch('password.txt');
+                if (!passRes.ok) throw new Error("Could not find password.txt in directory.");
+                const password = (await passRes.text()).trim();
+
+                status.innerText = "Connecting to router...";
+                
+                const nRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({module: "authenticator", action: 0})
+                });
+                
+                const nData = await nRes.json();
+                const nonce = nData.nonce;
+                document.getElementById('n-out').innerText = nonce;
+
+                if (!nonce) throw new Error("Failed to get nonce from router");
+
+                const digest = CryptoJS.MD5(`${password}:${nonce}`).toString();
+                const lRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({module: "authenticator", action: 1, digest: digest})
+                });
+                
+                const lData = await lRes.json();
+                const token = lData.token;
+                document.getElementById('t-out').innerText = token;
+
+                if (!token) throw new Error("Login Failed - check password.txt content.");
+
+                status.innerText = "Fetching SIM information...";
+                const sRes = await fetch(`http://${host}/cgi-bin/web_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({
+                        token: token,
+                        module: "status",
+                        action: 0
+                    })
+                });
+
+                const rawData = await sRes.text();
+                
+                output.innerHTML = "";
+                
+                function extractValue(pattern, data) {
+                    const regex = new RegExp(pattern);
+                    const match = data.match(regex);
+                    return match ? match[1] : null;
+                }
+                
+                const simNumber = extractValue(/"simNumber":\s*"([^"]*)"/, rawData);
+                const imsi = extractValue(/"imsi":\s*"([^"]*)"/, rawData);
+                const imei = extractValue(/"imei":\s*"([^"]*)"/, rawData);
+                
+                if (simNumber || imsi || imei) {
+                    const div = document.createElement('div');
+                    div.className = 'sim-info-section';
+                    div.innerHTML = `
+                        <div class="info-header">SIM Information</div>
+                        
+                        <div class="info-item">
+                            <span class="label">SIM Number:</span>
+                            <span class="value">${simNumber ? '+' + simNumber : 'Not found'}</span>
+                        </div>
+                        
+                        <div class="info-item">
+                            <span class="label">IMSI:</span>
+                            <span class="value">${imsi || 'Not found'}</span>
+                        </div>
+                        
+                        <div class="info-item">
+                            <span class="label">IMEI:</span>
+                            <span class="value">${imei || 'Not found'}</span>
+                        </div>
+                    `;
+                    
+                    output.appendChild(div);
+                    status.innerText = "✓ SIM information fetched successfully";
+                    
+                    const doneDiv = document.createElement('div');
+                    doneDiv.className = 'done-message';
+                    doneDiv.innerHTML = "Done.";
+                    output.appendChild(doneDiv);
+                    
+                } else {
+                    try {
+                        const jsonData = JSON.parse(rawData);
+                        const altDiv = document.createElement('div');
+                        altDiv.className = 'sim-info-section';
+                        altDiv.innerHTML = `
+                            <div class="info-header">SIM Information (JSON Parsed)</div>
+                            
+                            <div class="info-item">
+                                <span class="label">SIM Number:</span>
+                                <span class="value">${jsonData.simNumber ? '+' + jsonData.simNumber : 'Not found'}</span>
+                            </div>
+                            
+                            <div class="info-item">
+                                <span class="label">IMSI:</span>
+                                <span class="value">${jsonData.imsi || 'Not found'}</span>
+                            </div>
+                            
+                            <div class="info-item">
+                                <span class="label">IMEI:</span>
+                                <span class="value">${jsonData.imei || 'Not found'}</span>
+                            </div>
+                        `;
+                        
+                        output.appendChild(altDiv);
+                        status.innerText = "✓ SIM information fetched successfully (JSON)";
+                        
+                        const doneDiv = document.createElement('div');
+                        doneDiv.className = 'done-message';
+                        doneDiv.innerHTML = "Done.";
+                        output.appendChild(doneDiv);
+                        
+                    } catch (e) {
+                        status.innerText = "No SIM information found in response";
+                        
+                        const debugDiv = document.createElement('div');
+                        debugDiv.className = 'error';
+                        debugDiv.innerHTML = `
+                            <strong>Debug - Raw Response:</strong><br>
+                            <pre style="font-size:0.8em;color:#aaa;">${rawData}</pre>
+                        `;
+                        output.appendChild(debugDiv);
+                    }
+                }
+
+            } catch (e) {
+                status.innerText = "Error: " + e.message;
+                console.error(e);
+                
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.textContent = e.message;
+                output.appendChild(errorDiv);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>M7350 Quick Status - Auto Run</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Courier New', monospace; 
+            background: #121212; 
+            color: #00ff00; 
+            padding: 20px; 
+            line-height: 1.6;
+        }
+        .container { 
+            max-width: 800px; 
+            margin: auto; 
+            border: 2px solid #00ff00; 
+            padding: 25px; 
+            box-shadow: 0 0 20px #00ff0044;
+            background: #0a0a0a;
+        }
+        .handshake { 
+            color: #888; 
+            font-size: 0.8em; 
+            margin-bottom: 25px; 
+            border-bottom: 1px dashed #444; 
+            padding-bottom: 15px; 
+        }
+        .status-container { 
+            border: 1px solid #333; 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            background: #1a1a1a; 
+            border-radius: 5px;
+        }
+        .status-header {
+            color: #00ff00;
+            font-size: 1.3em;
+            border-bottom: 2px solid #00ff00;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .status-row { 
+            margin: 12px 0; 
+            padding: 8px 0; 
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #222;
+            transition: all 0.2s;
+        }
+        .status-row:hover {
+            background: rgba(0, 255, 0, 0.05);
+            padding-left: 10px;
+        }
+        .label { 
+            color: #00aaff; 
+            font-weight: bold; 
+            width: 180px;
+            flex-shrink: 0;
+        }
+        .value { 
+            color: #ffffff; 
+            font-family: 'Courier New', monospace;
+            flex-grow: 1;
+        }
+        .value-highlight {
+            color: #00ffaa;
+            font-weight: bold;
+        }
+        .value-note {
+            color: #888;
+            font-size: 0.9em;
+            font-style: italic;
+        }
+        #status { 
+            color: #ffaa00; 
+            margin: 15px 0; 
+            font-weight: bold;
+            padding: 10px;
+            background: rgba(255, 170, 0, 0.1);
+            border-left: 3px solid #ffaa00;
+        }
+        .pass-info { 
+            font-size: 0.8em; 
+            color: #666; 
+            margin-top: 5px; 
+        }
+        .auto-note { 
+            color: #ffff00; 
+            font-size: 0.9em; 
+            margin-bottom: 15px; 
+            padding: 10px; 
+            background: #222; 
+            border-radius: 3px;
+            border-left: 3px solid #ffff00;
+        }
+        .refresh-btn {
+            background: #222;
+            color: #00ff00;
+            border: 2px solid #00ff00;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin-top: 15px;
+            display: inline-block;
+        }
+        .refresh-btn:hover {
+            background: #00ff00;
+            color: #121212;
+            transform: translateY(-2px);
+            box-shadow: 0 0 15px #00ff00;
+        }
+        .error {
+            color: #ff5555;
+            border: 1px solid #ff5555;
+            padding: 15px;
+            background: rgba(255, 85, 85, 0.1);
+            margin: 15px 0;
+            border-radius: 3px;
+        }
+        .success {
+            color: #00ff00;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .bytes-info {
+            font-size: 0.85em;
+            color: #888;
+            margin-top: 5px;
+            padding-left: 180px;
+        }
+        .connection-status {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #00aa00;
+            color: white;
+            border-radius: 3px;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        .network-type {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #0055aa;
+            color: white;
+            border-radius: 3px;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body onload="fetchQuickStatus()">
+    <div class="container">
+        <h3 style="text-align: center; color: #00ff00; margin-bottom: 10px;">TP-Link M7350 Quick Status</h3>
+        <h4 style="text-align: center; color: #888; margin-top: 0; margin-bottom: 20px;">Auto-run on page load</h4>
+        
+        <div class="auto-note">⏳ Fetching quick status from router...</div>
+        
+        <div class="handshake">
+            <div class="pass-info">Reading credentials from <i>password.txt</i>...</div>
+            <div style="margin-top:12px; display: flex; gap: 20px; flex-wrap: wrap;">
+                <div>Nonce: <span id="n-out" style="color:#d2a8ff; font-weight: bold;">---</span></div>
+                <div>Token: <span id="t-out" style="color:#d2a8ff; font-weight: bold;">---</span></div>
+            </div>
+        </div>
+
+        <div id="status">Initializing connection to router...</div>
+        <div id="output"></div>
+        
+        <div style="text-align: center; margin-top: 20px;">
+            <button class="refresh-btn" onclick="fetchQuickStatus()">⟳ Refresh Status</button>
+        </div>
+    </div>
+
+    <script>
+        const host = "192.168.0.1";
+        let currentToken = '';
+        let currentNonce = '';
+
+        async function fetchQuickStatus() {
+            const status = document.getElementById('status');
+            const output = document.getElementById('output');
+
+            try {
+                output.innerHTML = '';
+                status.innerHTML = '<span style="color:#ffff00">⏳ Reading password from password.txt...</span>';
+                
+                const passRes = await fetch('password.txt');
+                if (!passRes.ok) throw new Error("Could not find password.txt in directory.");
+                const password = (await passRes.text()).trim();
+
+                status.innerHTML = '<span style="color:#ffff00">⏳ Getting nonce from router...</span>';
+                const nRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': `http://${host}/login.html`
+                    },
+                    body: JSON.stringify({module: "authenticator", action: 0})
+                });
+                
+                const nData = await nRes.json();
+                currentNonce = nData.nonce;
+                document.getElementById('n-out').innerText = currentNonce || '---';
+
+                if (!currentNonce) throw new Error("Failed to get nonce from router");
+
+                status.innerHTML = '<span style="color:#ffff00">⏳ Logging in...</span>';
+                const digest = CryptoJS.MD5(`${password}:${currentNonce}`).toString();
+                const lRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': `http://${host}/login.html`
+                    },
+                    body: JSON.stringify({module: "authenticator", action: 1, digest: digest})
+                });
+                
+                const lData = await lRes.json();
+                currentToken = lData.token;
+                document.getElementById('t-out').innerText = currentToken || '---';
+
+                if (!currentToken) throw new Error("Login Failed - check password.txt content.");
+
+                status.innerHTML = '<span style="color:#ffff00">⏳ Fetching status information...</span>';
+                const sRes = await fetch(`http://${host}/cgi-bin/web_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': `http://${host}/settings.html`
+                    },
+                    body: JSON.stringify({
+                        token: currentToken,
+                        module: "status",
+                        action: 0
+                    })
+                });
+
+                const rawData = await sRes.text();
+                
+                function extractValue(key) {
+                    const regex = new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`);
+                    const match = rawData.match(regex);
+                    return match ? match[1] : null;
+                }
+                
+                const ipv4 = extractValue('ipv4');
+                const ssid = extractValue('ssid');
+                const model = extractValue('model');
+                const firmware = extractValue('firmwareVer');
+                const mac = extractValue('mac');
+                
+                const clientsMatch = rawData.match(/"number"\s*:\s*(\d+)/);
+                const clients = clientsMatch ? clientsMatch[1] : '0';
+                
+                const bytesMatch = rawData.match(/"totalStatistics"\s*:\s*"([^"]*)"/);
+                const bytesStr = bytesMatch ? bytesMatch[1] : '0';
+                const bytes = parseInt(bytesStr.split('.')[0]) || 0;
+                
+                const gb = (bytes / 1073741824).toFixed(2);
+                
+                output.innerHTML = '';
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'status-container';
+                statusDiv.innerHTML = `
+                    <div class="status-header">=== FINAL STATUS ===</div>
+                    
+                    <div class="status-row">
+                        <span class="label">Connection Status:</span>
+                        <span class="value">
+                            Connected
+                            <span class="connection-status">✓</span>
+                        </span>
+                    </div>
+                    
+                    <div class="status-row">
+                        <span class="label">Network Type:</span>
+                        <span class="value">
+                            LTE
+                            <span class="network-type">4G</span>
+                        </span>
+                    </div>
+                    
+                    <div class="status-row">
+                        <span class="label">IPv4 Address:</span>
+                        <span class="value value-highlight">${ipv4 || 'N/A'}</span>
+                    </div>
+                    
+                    <div class="status-row">
+                        <span class="label">SSID:</span>
+                        <span class="value value-highlight">${ssid || 'N/A'}</span>
+                    </div>
+                    
+                    <div class="status-row">
+                        <span class="label">Current Clients:</span>
+                        <span class="value value-highlight">${clients}</span>
+                    </div>
+                    
+                    <div class="status-row">
+                        <span class="label">Monthly Used:</span>
+                        <span class="value value-highlight">${gb} GB</span>
+                    </div>
+                    <div class="bytes-info">(Raw bytes: ${bytes.toLocaleString()})</div>
+                    
+                    <div class="status-row">
+                        <span class="label">Model:</span>
+                        <span class="value">${model || 'Unknown'}</span>
+                    </div>
+                    
+                    <div class="status-row">
+                        <span class="label">Firmware:</span>
+                        <span class="value">${firmware || 'Unknown'}</span>
+                    </div>
+                    
+                    <div class="status-row">
+                        <span class="label">MAC Address:</span>
+                        <span class="value">${mac || 'Unknown'}</span>
+                    </div>
+                `;
+                
+                output.appendChild(statusDiv);
+                status.innerHTML = '<span style="color:#00ff00">✓ Status fetched successfully!</span>';
+                
+                const doneDiv = document.createElement('div');
+                doneDiv.className = 'success';
+                doneDiv.textContent = 'Done.';
+                output.appendChild(doneDiv);
+
+            } catch (e) {
+                status.innerHTML = `<span style="color:#ff5555">✗ Error: ${e.message}</span>`;
+                console.error(e);
+                
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.innerHTML = `
+                    <strong>Error Details:</strong><br>
+                    ${e.message}<br><br>
+                    <small>Check console for more details.</small>
+                `;
+                output.appendChild(errorDiv);
+            }
+        }
+    </script>
+</body>
+</html>

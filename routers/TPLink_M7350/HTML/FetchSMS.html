@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>M7350 SMS Parser - Fixed</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #121212; color: #00ff00; padding: 20px; }
+        .container { max-width: 800px; margin: auto; border: 1px solid #00ff00; padding: 20px; box-shadow: 0 0 15px #00ff0033; }
+        .handshake { color: #888; font-size: 0.8em; margin-bottom: 20px; border-bottom: 1px dashed #444; padding-bottom: 10px; }
+        .sms-entry { border: 1px solid #333; padding: 10px; margin-bottom: 15px; background: #1a1a1a; position: relative; }
+        .label { color: #0088ff; font-weight: bold; }
+        .unread-tag { position: absolute; top: 10px; right: 10px; color: red; font-size: 0.7em; border: 1px solid red; padding: 2px 5px; }
+        input { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; }
+        button { background: #0f0; color: #000; border: none; padding: 5px 15px; cursor: pointer; font-weight: bold; }
+        #status { color: #ff8800; margin: 10px 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h3>M7350 SMS Reader</h3>
+    
+    <div class="handshake">
+        Password: <input type="password" id="pass" value="password">
+        <button onclick="fetchSms()">RUN PARSER</button>
+        <div style="margin-top:10px;">
+            Nonce: <span id="n-out" style="color:#d2a8ff">---</span> | Token: <span id="t-out" style="color:#d2a8ff">---</span>
+        </div>
+    </div>
+
+    <div id="status">Ready.</div>
+    <div id="output"></div>
+</div>
+
+<script>
+    async function fetchSms() {
+        const host = "192.168.0.1";
+        const password = document.getElementById('pass').value;
+        const status = document.getElementById('status');
+        const output = document.getElementById('output');
+
+        try {
+            status.innerText = "Connecting...";
+           
+            const nRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                body: JSON.stringify({module: "authenticator", action: 0})
+            });
+            const { nonce } = await nRes.json();
+            document.getElementById('n-out').innerText = nonce;
+
+            const digest = CryptoJS.MD5(`${password}:${nonce}`).toString();
+            const lRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                body: JSON.stringify({module: "authenticator", action: 1, digest: digest})
+            });
+            const { token } = await lRes.json();
+            document.getElementById('t-out').innerText = token;
+
+            if (!token) throw new Error("Login Failed");
+
+            status.innerText = "Fetching SMS JSON...";
+            const sRes = await fetch(`http://${host}/cgi-bin/web_cgi`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+                body: JSON.stringify({
+                    token: token,
+                    module: "message",
+                    action: 2,
+                    pageNumber: 1,
+                    amountPerPage: 8,
+                    box: 0
+                })
+            });
+
+            const data = await sRes.json();
+            
+            output.innerHTML = "";
+            const smsList = data.messageList || [];
+
+            if (smsList.length > 0) {
+                smsList.forEach(m => {
+                    const div = document.createElement('div');
+                    div.className = 'sms-entry';
+                    div.innerHTML = `
+                        ${m.unread ? '<span class="unread-tag">NEW</span>' : ''}
+                        <div><span class="label">From:</span> ${m.from}</div>
+                        <div><span class="label">Date:</span> ${m.receivedTime}</div>
+                        <div style="margin-top:10px; color:#fff;">${m.content}</div>
+                        <div style="font-size:0.7em; color:#444; margin-top:5px;">Index: ${m.index}</div>
+                    `;
+                    output.appendChild(div);
+                });
+                status.innerText = `Success: ${data.totalNumber} messages found.`;
+            } else {
+                status.innerText = "Inbox is empty.";
+            }
+
+        } catch (e) {
+            status.innerText = "Error: " + e.message;
+        }
+    }
+</script>
+</body>
+</html>
