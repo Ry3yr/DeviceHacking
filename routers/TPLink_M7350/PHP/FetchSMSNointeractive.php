@@ -1,170 +1,129 @@
-<!DOCTYPE html>
-<html lang="en">
+<?php
+// Define host and file locations
+$host = "192.168.0.1";
+$passwordFile = "password.txt";
+
+// Function to make a cURL request
+function curl_request($url, $data) {
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/x-www-form-urlencoded; charset=UTF-8'
+    ]);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    return $response;
+}
+
+// Read password from file
+$password = file_get_contents($passwordFile);
+if (!$password) {
+    echo "Error: Could not read password from $passwordFile.\n";
+    exit(1);
+}
+$password = trim($password);
+
+// 1. Get Nonce (Silent)
+$nonce_response = curl_request("http://$host/cgi-bin/auth_cgi", [
+    "module" => "authenticator",
+    "action" => 0
+]);
+
+$nonce_data = json_decode($nonce_response, true);
+$nonce = $nonce_data['nonce'] ?? null;
+
+if (!$nonce) {
+    echo "Error: Failed to get nonce\n";
+    exit(1);
+}
+
+// 2. Login (Silent)
+$digest = md5("$password:$nonce");
+$login_response = curl_request("http://$host/cgi-bin/auth_cgi", [
+    "module" => "authenticator",
+    "action" => 1,
+    "digest" => $digest
+]);
+
+$login_data = json_decode($login_response, true);
+$token = $login_data['token'] ?? null;
+
+if (!$token) {
+    echo "Error: Login failed - check password\n";
+    exit(1);
+}
+
+// 3. Fetch SMS
+$sms_response = curl_request("http://$host/cgi-bin/web_cgi", [
+    "token" => $token,
+    "module" => "message",
+    "action" => 2,
+    "pageNumber" => 1,
+    "amountPerPage" => 8,
+    "box" => 0
+]);
+
+// DEBUGGING: Output the raw SMS response for inspection
+echo "<pre>Raw SMS Response: " . htmlspecialchars($sms_response) . "</pre>";
+
+$sms_data = json_decode($sms_response, true);
+
+// DEBUGGING: Output the parsed JSON for inspection
+echo "<pre>Parsed SMS Data: ";
+print_r($sms_data);
+echo "</pre>";
+
+$sms_list = $sms_data['messageList'] ?? [];
+$total_messages = $sms_data['totalNumber'] ?? 0;
+
+// HTML Structure
+echo "<!DOCTYPE html>
+<html lang='en'>
 <head>
-    <meta charset="UTF-8">
-    <title>M7350 SMS Parser - Auto Run</title>
+    <meta charset='UTF-8'>
+    <title>M7350 SMS Parser</title>
     <style>
         body { font-family: 'Courier New', monospace; background: #121212; color: #00ff00; padding: 20px; }
         .container { max-width: 800px; margin: auto; border: 1px solid #00ff00; padding: 20px; box-shadow: 0 0 15px #00ff0033; }
-        .handshake { color: #888; font-size: 0.8em; margin-bottom: 20px; border-bottom: 1px dashed #444; padding-bottom: 10px; }
         .sms-entry { border: 1px solid #333; padding: 10px; margin-bottom: 15px; background: #1a1a1a; position: relative; }
         .label { color: #0088ff; font-weight: bold; }
         .unread-tag { position: absolute; top: 10px; right: 10px; color: red; font-size: 0.7em; border: 1px solid red; padding: 2px 5px; }
         #status { color: #ff8800; margin: 10px 0; }
-        .pass-info { font-size: 0.8em; color: #666; margin-top: 5px; }
-        .auto-note { color: #ffff00; font-size: 0.9em; margin-bottom: 10px; padding: 5px; background: #222; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h3>M7350 SMS Reader</h3>
-        
-        <div class="auto-note">✓ Auto-running parser on page load...</div>
-        
-        <?php
-        $host = "192.168.0.1";
-        $status = "Initializing...";
-        $output = "";
-        $n_out = "---";
-        $t_out = "---";
-        
-        try {
-            // Read password from password.txt
-            $status = "Reading local password.txt...";
-            if (!file_exists('password.txt')) {
-                throw new Exception("Could not find password.txt in directory.");
-            }
-            $password = trim(file_get_contents('password.txt'));
-            
-            // Step 1: Get nonce
-            $status = "Connecting to router...";
-            $nonceData = json_encode(['module' => 'authenticator', 'action' => 0]);
-            
-            $ch = curl_init("http://{$host}/cgi-bin/auth_cgi");
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $nonceData,
-                CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded; charset=UTF-8'],
-                CURLOPT_TIMEOUT => 10,
-            ]);
-            
-            $response = curl_exec($ch);
-            if (curl_errno($ch)) {
-                throw new Exception("Connection failed: " . curl_error($ch));
-            }
-            curl_close($ch);
-            
-            $nonceResult = json_decode($response, true);
-            if (!$nonceResult || !isset($nonceResult['nonce'])) {
-                throw new Exception("Failed to get nonce from router.");
-            }
-            
-            $nonce = $nonceResult['nonce'];
-            $n_out = htmlspecialchars($nonce);
-            
-            // Step 2: Calculate digest and get token
-            $digest = md5($password . ':' . $nonce);
-            $loginData = json_encode([
-                'module' => 'authenticator',
-                'action' => 1,
-                'digest' => $digest
-            ]);
-            
-            $ch = curl_init("http://{$host}/cgi-bin/auth_cgi");
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $loginData,
-                CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded; charset=UTF-8'],
-                CURLOPT_TIMEOUT => 10,
-            ]);
-            
-            $response = curl_exec($ch);
-            if (curl_errno($ch)) {
-                throw new Exception("Login failed: " . curl_error($ch));
-            }
-            curl_close($ch);
-            
-            $loginResult = json_decode($response, true);
-            if (!$loginResult || !isset($loginResult['token'])) {
-                throw new Exception("Login Failed - check password.txt content.");
-            }
-            
-            $token = $loginResult['token'];
-            $t_out = htmlspecialchars($token);
-            
-            // Step 3: Fetch SMS messages
-            $status = "Fetching SMS JSON...";
-            $smsData = json_encode([
-                'token' => $token,
-                'module' => 'message',
-                'action' => 2,
-                'pageNumber' => 1,
-                'amountPerPage' => 8,
-                'box' => 0
-            ]);
-            
-            $ch = curl_init("http://{$host}/cgi-bin/web_cgi");
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $smsData,
-                CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded; charset=UTF-8'],
-                CURLOPT_TIMEOUT => 10,
-            ]);
-            
-            $response = curl_exec($ch);
-            if (curl_errno($ch)) {
-                throw new Exception("Failed to fetch SMS: " . curl_error($ch));
-            }
-            curl_close($ch);
-            
-            $smsResult = json_decode($response, true);
-            
-            // Process SMS messages
-            if (isset($smsResult['messageList']) && count($smsResult['messageList']) > 0) {
-                $smsList = $smsResult['messageList'];
-                
-                foreach ($smsList as $m) {
-                    $unreadTag = isset($m['unread']) && $m['unread'] ? '<span class="unread-tag">NEW</span>' : '';
-                    $from = htmlspecialchars($m['from'] ?? 'Unknown');
-                    $date = htmlspecialchars($m['receivedTime'] ?? 'Unknown');
-                    $content = htmlspecialchars($m['content'] ?? '');
-                    $index = htmlspecialchars($m['index'] ?? '');
-                    
-                    $output .= "
-                    <div class='sms-entry'>
-                        {$unreadTag}
-                        <div><span class='label'>From:</span> {$from}</div>
-                        <div><span class='label'>Date:</span> {$date}</div>
-                        <div style='margin-top:10px; color:#fff;'>{$content}</div>
-                        <div style='font-size:0.7em; color:#444; margin-top:5px;'>Index: {$index}</div>
-                    </div>
-                    ";
-                }
-                
-                $total = $smsResult['totalNumber'] ?? count($smsList);
-                $status = "Success: {$total} messages found.";
-            } else {
-                $status = "Inbox is empty.";
-            }
-            
-        } catch (Exception $e) {
-            $status = "Error: " . htmlspecialchars($e->getMessage());
-        }
-        ?>
-        
-        <div class="handshake">
-            <div class="pass-info">Reading credentials from <i>password.txt</i>...</div>
-            <div style="margin-top:10px;">
-                Nonce: <span id="n-out" style="color:#d2a8ff"><?php echo $n_out; ?></span> | 
-                Token: <span id="t-out" style="color:#d2a8ff"><?php echo $t_out; ?></span>
-            </div>
-        </div>
 
-        <div id="status"><?php echo htmlspecialchars($status); ?></div>
-        <div id="output"><?php echo $output; ?></div>
+    <div class='container'>
+        <h3>M7350 SMS Reader</h3>
+        <div id='status'>Initializing...</div>
+        <div id='output'></div>
     </div>
-</body>
-</html>
+
+    <script>
+        document.getElementById('status').innerText = 'Fetching SMS...';
+    </script>";
+
+if ($sms_list) {
+    echo "<div id='status'>Success: $total_messages messages found.</div>";
+
+    foreach ($sms_list as $sms) {
+        $from = htmlspecialchars($sms['from']);
+        $date = htmlspecialchars($sms['receivedTime']);
+        $content = nl2br(htmlspecialchars($sms['content']));
+        $unread = isset($sms['unread']) && $sms['unread'] ? '<span class="unread-tag">NEW</span>' : '';
+        
+        echo "<div class='sms-entry'>
+            $unread
+            <div><span class='label'>From:</span> $from</div>
+            <div><span class='label'>Date:</span> $date</div>
+            <div style='margin-top:10px;'>$content</div>
+        </div>";
+    }
+} else {
+    echo "<div id='status'>Inbox is empty.</div>";
+}
+
+echo "</body></html>";
+?>
