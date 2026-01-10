@@ -107,7 +107,9 @@ function parseDirectory(html,path){
    <div class=file-name>`;
   
   if(isDir){
-   h+=`<a href="#" onclick="loadDirectory('${fullPath}');return false"><strong>${displayName}/</strong></a>`;
+   //h+=`<a href="#" onclick="loadDirectory('${fullPath}');return false"><strong>${displayName}/</strong></a>`;
+   h+=`<a href="#" onclick="loadDirectory('${fullPath}');return false" style="${displayName==='cgi-bin'?'opacity:0.0;':''}"><strong>${displayName}/</strong></a>`;
+
   }else{
    h+=displayName;
   }
