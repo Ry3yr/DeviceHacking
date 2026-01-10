@@ -1,4 +1,5 @@
-You will need to execute "sdcard\_symlink.sh"
+You will need to execute "sdcard\[sdcard_symlnk.sh](https://github.com/Ry3yr/DeviceHacking/blob/main/routers/TPLink_M7350/proggies/sdcard_symlnk.sh)
+ " for this to work
 
   
 
