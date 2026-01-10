@@ -22,4 +22,6 @@ chmod +x /media/card/ext/cgi-bin/\*.sh 2>/dev/null
 ---------
 After setup is complete you can browser your /ext folder in browser by visitng 192.168.0.1/card/ext/html/browse.html
 
-Incase you made an sh and placed it onto the routers sdcard yourself sh's also have a dedicated "fix Permission" button
+Incase you made an sh and placed it onto the routers sdcard yourself sh's also have a dedicated "fix Permission" button  
+
+ Demo: https://infosec.exchange/@alcea/115872193970975022
