@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html><head><meta charset=UTF-8><title>SD Card Files</title><style>
+body{font-family:monospace;margin:10px;background:#f0f0f0}
+.container{max-width:900px;margin:auto;background:#fff;border:1px solid #ccc;border-radius:3px}
+.header{background:#333;color:#fff;padding:10px 15px}
+.header h1{margin:0;font-size:18px;font-weight:400}
+.path{background:#f8f8f8;padding:5px 15px;border-bottom:1px solid #ddd;color:#666}
+.file-list{padding:0;margin:0;list-style:none}
+.file-item{padding:8px 15px;border-bottom:1px solid #eee;display:flex;align-items:center}
+.file-item:hover{background:#f9f9f9}
+.file-icon{margin-right:8px;width:20px;text-align:center}
+.file-name{flex:1}
+.file-actions{margin-left:8px;white-space:nowrap}
+.btn{padding:3px 8px;border:1px solid #ccc;border-radius:2px;cursor:pointer;font-size:11px;text-decoration:none;color:#333;background:#f0f0f0;display:inline-block}
+.btn:hover{background:#e0e0e0}
+.btn-run{border-color:#28a745;color:#28a745}
+.btn-run:hover{background:#e8f5e9}
+.btn-view{border-color:#007bff;color:#007bff}
+.btn-view:hover{background:#e8f4ff}
+.btn-fix{border-color:#ff9800;color:#ff9800}
+.btn-fix:hover{background:#fff3e0}
+.btn-open{border-color:#6c757d;color:#6c757d}
+.btn-open:hover{background:#f8f9fa}
+.loading{padding:30px;text-align:center;color:#777}
+.dir{color:#0066cc;font-weight:bold}
+.sh-file{color:#28a745}
+.breadcrumb{color:#0066cc;cursor:pointer}
+.breadcrumb:hover{text-decoration:underline}
+.path-separator{margin:0 5px;color:#999}
+.msg{background:#e8f5e8;padding:8px;margin:5px 0;border-radius:3px;font-size:12px}
+</style></head><body>
+<div class=container>
+<div class=header><h1>SD Card File Manager</h1></div>
+<div class=path>Path: <span id=breadcrumb><span class=breadcrumb onclick="loadDirectory('')">/</span></span></div>
+<div id=file-list class=loading>Loading...</div>
+</div>
+<script>
+let currentPath='';
+async function fetchDirectory(path=''){
+ const url=path?`/card/ext/${path}`:'/card/ext/';
+ try{
+  const r=await fetch(url);const h=await r.text();parseDirectory(h,path);
+ }catch(e){
+  document.getElementById('file-list').innerHTML=`<div style="color:red;padding:30px;text-align:center">Error: ${e.message}</div>`;
+ }
+}
+function updateBreadcrumb(path){
+ const b=document.getElementById('breadcrumb');
+ let h=`<span class=breadcrumb onclick="loadDirectory('')">/</span>`;
+ if(path){
+  const p=path.split('/').filter(x=>x);
+  let a='';
+  p.forEach((part,i)=>{
+   a+=(a?'/':'')+part;
+   h+=`<span class=path-separator>/</span><span class=breadcrumb onclick="loadDirectory('${a}')">${part}</span>`;
+  });
+ }
+ b.innerHTML=h;
+}
+function parseDirectory(html,path){
+ const p=new DOMParser();const d=p.parseFromString(html,'text/html');
+ const f=document.getElementById('file-list');
+ updateBreadcrumb(path);
+ let h='';const rows=d.querySelectorAll('tbody tr');
+ let hasItems=false;
+ 
+ // Add parent directory if not at root
+ if(path){
+  hasItems=true;
+  const parts=path.split('/').filter(x=>x);
+  parts.pop();
+  const parentPath=parts.join('/');
+  h+=`<li class="file-item dir">
+   <div class=file-icon>[D]</div>
+   <div class=file-name><a href="#" onclick="loadDirectory('${parentPath}');return false"><strong>../ (Parent)</strong></a></div>
+   <div class=file-actions><a href="#" onclick="loadDirectory('${parentPath}');return false" class="btn btn-open">Open</a></div>
+  </li>`;
+ }
+ 
+ rows.forEach(row=>{
+  const cells=row.cells;
+  if(!cells[0])return;
+  
+  const link=cells[0].querySelector('a');
+  if(!link)return;
+  
+  const name=link.textContent;
+  const href=link.getAttribute('href');
+  
+  // Skip parent directory
+  if(name.includes('Parent Directory')||href==='../')return;
+  
+  hasItems=true;
+  
+  // Check if it's a directory
+  const typeCell=cells[3];
+  const isDir=typeCell&&typeCell.textContent.includes('Directory');
+  const isSh=name.endsWith('.sh')||href.endsWith('.sh');
+  
+  const displayName=name;
+  const relPath=path?`${path}/${href}`:href;
+  const fullPath=path?`${path}/${displayName}`:displayName;
+  const icon=isDir?'[D]':isSh?'[SH]':'[F]';
+  
+  h+=`<li class="file-item ${isDir?'dir':''} ${isSh?'sh-file':''}">
+   <div class=file-icon>${icon}</div>
+   <div class=file-name>`;
+  
+  if(isDir){
+   h+=`<a href="#" onclick="loadDirectory('${fullPath}');return false"><strong>${displayName}/</strong></a>`;
+  }else{
+   h+=displayName;
+  }
+  
+  h+=`</div><div class=file-actions>`;
+  
+  if(isDir){
+   h+=`<a href="#" onclick="loadDirectory('${fullPath}');return false" class="btn btn-open">Open</a>`;
+  }else if(isSh){
+   h+=`<a href="/card/ext/cgi-bin/exec.sh?script=${encodeURIComponent(relPath)}" target=_blank class="btn btn-run">Run</a>
+    <a href="/card/ext/cgi-bin/fixperm.sh?script=${encodeURIComponent(relPath)}" target=_blank class="btn btn-fix">Fix Perms</a>
+    <a href="/card/ext/${relPath}" target=_blank class="btn btn-view">View</a>`;
+  }else{
+   h+=`<a href="/card/ext/${relPath}" target=_blank class="btn btn-view">View</a>`;
+  }
+  
+  h+=`</div></li>`;
+ });
+ 
+ f.innerHTML=hasItems?`<ul class=file-list>${h}</ul>`:'<div class=loading>Empty directory</div>';
+}
+function loadDirectory(path){
+ currentPath=path;
+ document.getElementById('file-list').innerHTML='<div class=loading>Loading...</div>';
+ fetchDirectory(path);
+}
+document.addEventListener('DOMContentLoaded',()=>{loadDirectory();});
+</script>
+</body></html>
