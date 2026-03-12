@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>M7350 Power Control</title>
+    <script src="crypto-js.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Courier New', monospace; 
+            background: #121212; 
+            color: #00ff00; 
+            padding: 20px; 
+            line-height: 1.6;
+        }
+        .container { 
+            max-width: 800px; 
+            margin: auto; 
+            border: 2px solid #00ff00; 
+            padding: 25px; 
+            box-shadow: 0 0 20px #00ff0044;
+            background: #0a0a0a;
+        }
+        .handshake { 
+            color: #888; 
+            font-size: 0.8em; 
+            margin-bottom: 25px; 
+            border-bottom: 1px dashed #444; 
+            padding-bottom: 15px; 
+        }
+        .section {
+            border: 1px solid #444;
+            padding: 20px;
+            margin: 20px 0;
+            background: #1a1a1a;
+            border-radius: 5px;
+        }
+        .danger-section {
+            border-color: #ff5555;
+            background: rgba(255, 85, 85, 0.05);
+        }
+        .warning-section {
+            border-color: #ffaa00;
+            background: rgba(255, 170, 0, 0.05);
+        }
+        .section-header {
+            color: #00ff00;
+            font-size: 1.2em;
+            border-bottom: 2px solid #00ff00;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .danger-section .section-header {
+            color: #ff5555;
+            border-color: #ff5555;
+        }
+        .warning-section .section-header {
+            color: #ffaa00;
+            border-color: #ffaa00;
+        }
+        #status { 
+            color: #ffaa00; 
+            margin: 15px 0; 
+            font-weight: bold;
+            padding: 10px;
+            background: rgba(255, 170, 0, 0.1);
+            border-left: 3px solid #ffaa00;
+        }
+        .btn {
+            background: #222;
+            color: #00ff00;
+            border: 2px solid #00ff00;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin: 5px;
+            display: inline-block;
+        }
+        .btn:hover {
+            background: #00ff00;
+            color: #121212;
+            transform: translateY(-2px);
+            box-shadow: 0 0 15px #00ff00;
+        }
+        .btn-warning {
+            border-color: #ffaa00;
+            color: #ffaa00;
+        }
+        .btn-warning:hover {
+            background: #ffaa00;
+            color: #121212;
+            box-shadow: 0 0 15px #ffaa00;
+        }
+        .btn-danger {
+            border-color: #ff5555;
+            color: #ff5555;
+        }
+        .btn-danger:hover {
+            background: #ff5555;
+            color: white;
+            box-shadow: 0 0 15px #ff5555;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+        .error {
+            color: #ff5555;
+            border: 1px solid #ff5555;
+            padding: 15px;
+            background: rgba(255, 85, 85, 0.1);
+            margin: 15px 0;
+            border-radius: 3px;
+        }
+        .success {
+            color: #00ff00;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+            background: rgba(0, 255, 0, 0.1);
+            border-radius: 3px;
+        }
+        .warning {
+            color: #ffaa00;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+            background: rgba(255, 170, 0, 0.1);
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+        .debug-info {
+            font-size: 0.8em;
+            color: #888;
+            background: #222;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .cookie-display {
+            background: #1a1a1a;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.9em;
+            margin: 5px 0;
+        }
+        .countdown {
+            font-size: 2em;
+            text-align: center;
+            color: #ff5555;
+            margin: 20px 0;
+            font-weight: bold;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .raw-response {
+            font-family: monospace;
+            font-size: 0.8em;
+            color: #888;
+            background: #111;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+            word-break: break-all;
+        }
+        .command-display {
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+            border-left: 3px solid #00ff00;
+        }
+        .power-off-display {
+            background: rgba(255, 85, 85, 0.1);
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+            border-left: 3px solid #ff5555;
+        }
+    </style>
+</head>
+<body onload="initialize()">
+    <div class="container">
+        <h3 style="text-align: center; color: #00ff00; margin-bottom: 10px;">M7350 Power Control</h3>
+        <h4 style="text-align: center; color: #888; margin-top: 0; margin-bottom: 20px;">Reboot & Power Off Functions</h4>
+        
+        <div class="handshake">
+            <div style="margin-top:12px; display: flex; gap: 20px; flex-wrap: wrap;">
+                <div>Token: <span id="t-out" style="color:#d2a8ff; font-weight: bold;">---</span></div>
+                <div>Cookies: <span id="c-out" style="color:#d2a8ff; font-weight: bold;">No</span></div>
+                <div>Auth: <span id="s-out" style="color:#d2a8ff; font-weight: bold;">Not connected</span></div>
+            </div>
+        </div>
+
+        <div id="status">Initializing...</div>
+
+        <!-- Debug Section -->
+        <div class="section">
+            <div class="section-header">Debug Information</div>
+            <div class="debug-info">
+                <strong>FROM NETWORK DUMP:</strong>
+                • Endpoint: POST /cgi-bin/web_cgi
+                • Cookies required: check_cookie, tpweb_token
+                • Response: 16 bytes ({"result":1})
+                
+                <strong>REBOOT COMMAND:</strong>
+                {"token":"[TOKEN]","module":"reboot","action":0}
+                
+                <strong>POWER OFF COMMAND:</strong>
+                {"token":"[TOKEN]","module":"reboot","action":1}
+            </div>
+            <div class="btn-group">
+                <button class="btn" onclick="testConnection()">Test Connection</button>
+                <button class="btn" onclick="dumpCookies()">Show Cookies</button>
+            </div>
+            <div id="debug-output"></div>
+        </div>
+
+        <!-- Reboot Section -->
+        <div class="section warning-section">
+            <div class="section-header">⚠️ REBOOT FUNCTION</div>
+            
+            <div class="command-display">
+                <strong>REBOOT COMMAND:</strong><br>
+                <code>
+                POST http://192.168.0.1/cgi-bin/web_cgi<br>
+                Body: {"token":"[TOKEN]","module":"reboot","action":0}
+                </code>
+            </div>
+            
+            <div id="reboot-output">
+                <div class="warning">
+                    Will restart the device (takes 60-90 seconds)
+                </div>
+            </div>
+            
+            <div class="btn-group">
+                <button class="btn btn-warning" onclick="exactReboot()">⚡ SEND REBOOT (action:0)</button>
+            </div>
+            
+            <div id="reboot-response" class="raw-response">
+                Reboot response will appear here...
+            </div>
+        </div>
+
+        <!-- Power Off Section -->
+        <div class="section danger-section">
+            <div class="section-header">☠️ POWER OFF FUNCTION</div>
+            
+            <div class="power-off-display">
+                <strong>POWER OFF COMMAND (action:1):</strong><br>
+                <code>
+                POST http://192.168.0.1/cgi-bin/web_cgi<br>
+                Body: {"token":"[TOKEN]","module":"reboot","action":1}
+                </code>
+                <br><br>
+                <span style="color:#ff5555; font-weight: bold;">
+                    ⚠️ WARNING: This will power off the device completely!<br>
+                    • All connections lost immediately<br>
+                    • Physical power button required to restart<br>
+                    • Cannot be undone remotely
+                </span>
+            </div>
+            
+            <div id="poweroff-output">
+                <div class="error">
+                    ⚠️ CRITICAL OPERATION - USE WITH EXTREME CAUTION
+                </div>
+            </div>
+            
+            <div class="btn-group">
+                <button class="btn btn-danger" onclick="exactPowerOff()">☠️ SEND POWER OFF (action:1)</button>
+            </div>
+            
+            <div id="poweroff-response" class="raw-response">
+                Power off response will appear here...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const host = "192.168.0.1";
+        let currentToken = '';
+        let currentCookies = {
+            check_cookie: 'check_cookie',
+            tpweb_token: ''
+        };
+
+        async function initialize() {
+            const status = document.getElementById('status');
+            try {
+                // Read password from password.txt
+                status.innerHTML = '<span style="color:#ffff00">⏳ Reading password...</span>';
+                const passRes = await fetch('password.txt');
+                if (!passRes.ok) throw new Error("password.txt not found");
+                const password = (await passRes.text()).trim();
+
+                // Get nonce
+                status.innerHTML = '<span style="color:#ffff00">⏳ Getting nonce...</span>';
+                const nRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': `http://${host}/login.html`
+                    },
+                    body: JSON.stringify({module: "authenticator", action: 0})
+                });
+                
+                const nData = await nRes.json();
+                const nonce = nData.nonce;
+                if (!nonce) throw new Error("Failed to get nonce");
+
+                // Login
+                status.innerHTML = '<span style="color:#ffff00">⏳ Logging in...</span>';
+                const digest = CryptoJS.MD5(`${password}:${nonce}`).toString();
+                const lRes = await fetch(`http://${host}/cgi-bin/auth_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': `http://${host}/login.html`
+                    },
+                    body: JSON.stringify({module: "authenticator", action: 1, digest: digest})
+                });
+                
+                const lData = await lRes.json();
+                currentToken = lData.token;
+                
+                if (!currentToken) throw new Error("Login failed - no token received");
+
+                // Set cookies EXACTLY as in network dump
+                currentCookies.tpweb_token = currentToken;
+                
+                document.getElementById('t-out').innerText = currentToken.substring(0, 20) + '...';
+                document.getElementById('c-out').innerText = 'check_cookie, tpweb_token';
+                document.getElementById('s-out').innerText = 'Authenticated';
+                document.getElementById('s-out').style.color = '#00ff00';
+                
+                status.innerHTML = '<span style="color:#00ff00">✓ Authenticated successfully!</span>';
+                
+            } catch (e) {
+                status.innerHTML = `<span style="color:#ff5555">✗ Error: ${e.message}</span>`;
+                console.error(e);
+            }
+        }
+
+        async function makeRequest(module, action, responseElementId) {
+            const status = document.getElementById('status');
+            const responseDisplay = document.getElementById(responseElementId);
+            
+            // Build EXACT request as in network dump
+            const data = {
+                token: currentToken,
+                module: module,
+                action: action
+            };
+
+            try {
+                // Build EXACT cookie string from network dump
+                const cookieString = `check_cookie=${currentCookies.check_cookie}; tpweb_token=${currentCookies.tpweb_token}`;
+                
+                console.log(`Sending ${module} command with action ${action}:`, {
+                    url: `http://${host}/cgi-bin/web_cgi`,
+                    method: "POST",
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': `http://${host}/settings.html`,
+                        'Cookie': cookieString
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const response = await fetch(`http://${host}/cgi-bin/web_cgi`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': `http://${host}/settings.html`,
+                        'Cookie': cookieString
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const rawData = await response.text();
+                
+                // Display raw response
+                responseDisplay.innerHTML = `
+                    <strong>Response (${rawData.length} bytes):</strong><br>
+                    ${rawData.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+                    <br><br>
+                    <strong>Status:</strong> ${response.status} ${response.statusText}
+                `;
+                
+                return {success: true, data: rawData, response: response};
+                
+            } catch (e) {
+                status.innerHTML = `<span style="color:#ff5555">✗ Request failed: ${e.message}</span>`;
+                responseDisplay.innerHTML = `<span style="color:#ff5555">Error: ${e.message}</span>`;
+                return {success: false, error: e.message};
+            }
+        }
+
+        async function exactReboot() {
+            if (!currentToken) {
+                alert("Please authenticate first");
+                return;
+            }
+
+            const status = document.getElementById('status');
+            const output = document.getElementById('reboot-output');
+            
+            if (!confirm("REBOOT DEVICE?\n\nThis will restart the router and disconnect all users.\nThe process takes about 60-90 seconds.\n\nClick OK to continue or Cancel to abort.")) {
+                return;
+            }
+            
+            status.innerHTML = '<span style="color:#ffaa00">⚠️ Sending reboot command (action:0)...</span>';
+            output.innerHTML = `
+                <div class="warning">
+                    <strong>SENDING REBOOT COMMAND:</strong><br>
+                    POST /cgi-bin/web_cgi<br>
+                    Body: {"token":"${currentToken}","module":"reboot","action":0}<br>
+                    Cookies: check_cookie=${currentCookies.check_cookie}; tpweb_token=${currentCookies.tpweb_token}
+                </div>
+            `;
+            
+            try {
+                // Send reboot command with action:0
+                const result = await makeRequest("reboot", 0, "reboot-response");
+                
+                if (result.success && result.data && result.data.includes('"result":1')) {
+                    output.innerHTML += `
+                        <div class="success">
+                            ✓ REBOOT COMMAND SENT SUCCESSFULLY!
+                        </div>
+                        <div class="countdown" id="reboot-countdown">REBOOTING...</div>
+                        <div class="warning">
+                            Device is restarting. This will take 60-90 seconds.<br>
+                            Connection will be lost temporarily.
+                        </div>
+                    `;
+                    status.innerHTML = '<span style="color:#00ff00">✓ Reboot initiated</span>';
+                    
+                    // Start countdown animation
+                    let countdown = 90;
+                    const countdownEl = document.getElementById('reboot-countdown');
+                    const countdownInterval = setInterval(() => {
+                        countdown--;
+                        countdownEl.textContent = `REBOOTING... ${countdown}s`;
+                        
+                        if (countdown <= 0) {
+                            clearInterval(countdownInterval);
+                            countdownEl.textContent = "DEVICE SHOULD BE RESTARTED";
+                            countdownEl.style.color = "#00ff00";
+                            
+                            // Show reconnect message
+                            setTimeout(() => {
+                                output.innerHTML += `
+                                    <div class="warning">
+                                        Attempting to reconnect in 10 seconds...
+                                    </div>
+                                `;
+                                
+                                setTimeout(() => {
+                                    alert("Device should be restarted. Click OK to refresh connection.");
+                                    location.reload();
+                                }, 10000);
+                            }, 2000);
+                        }
+                    }, 1000);
+                    
+                } else if (result.success && result.data && result.data.includes('"result":0')) {
+                    output.innerHTML += `
+                        <div class="error">
+                            ✗ Reboot command rejected by device
+                        </div>
+                    `;
+                    status.innerHTML = '<span style="color:#ff5555">✗ Reboot rejected</span>';
+                } else {
+                    output.innerHTML += `
+                        <div class="error">
+                            ✗ Unexpected response from device
+                        </div>
+                    `;
+                    status.innerHTML = '<span style="color:#ff5555">✗ Unexpected response</span>';
+                }
+                
+            } catch (e) {
+                output.innerHTML += `
+                    <div class="error">
+                        ✗ Reboot failed: ${e.message}
+                    </div>
+                `;
+                status.innerHTML = `<span style="color:#ff5555">✗ Error: ${e.message}</span>`;
+            }
+        }
+
+        async function exactPowerOff() {
+            if (!currentToken) {
+                alert("Please authenticate first");
+                return;
+            }
+
+            const status = document.getElementById('status');
+            const output = document.getElementById('poweroff-output');
+            
+            // Extra warning for power off
+            if (!confirm("POWER OFF DEVICE?\n\n⚠️ CRITICAL WARNING: This will POWER OFF the device completely!\n\n• All network connections will be lost IMMEDIATELY\n• Device will SHUT DOWN completely\n• PHYSICAL POWER BUTTON press required to restart\n• Cannot be undone remotely\n\nAre you ABSOLUTELY sure you want to proceed?")) {
+                return;
+            }
+            
+            // Final confirmation
+            if (!confirm("FINAL CONFIRMATION:\n\nYou are about to POWER OFF the device.\n\nThis action is IRREVERSIBLE remotely.\n\nType 'POWEROFF' to confirm:")) {
+                return;
+            }
+            
+            const userInput = prompt("Type 'POWEROFF' (all caps) to confirm device shutdown:");
+            if (userInput !== "POWEROFF") {
+                alert("Power off cancelled.");
+                return;
+            }
+            
+            status.innerHTML = '<span style="color:#ff5555">⚠️ Sending POWER OFF command (action:1)...</span>';
+            output.innerHTML = `
+                <div class="error">
+                    <strong>⚠️ SENDING POWER OFF COMMAND:</strong><br>
+                    POST /cgi-bin/web_cgi<br>
+                    Body: {"token":"${currentToken}","module":"reboot","action":1}<br>
+                    Cookies: check_cookie=${currentCookies.check_cookie}; tpweb_token=${currentCookies.tpweb_token}
+                </div>
+            `;
+            
+            try {
+                // Send power off command with action:1
+                const result = await makeRequest("reboot", 1, "poweroff-response");
+                
+                if (result.success && result.data && result.data.includes('"result":1')) {
+                    output.innerHTML += `
+                        <div class="error" style="border-color: #ff0000; background: rgba(255,0,0,0.1);">
+                            ⚠️ POWER OFF COMMAND ACCEPTED!
+                        </div>
+                        <div class="countdown" id="poweroff-countdown">SHUTTING DOWN...</div>
+                        <div class="error">
+                            <strong>DEVICE IS POWERING OFF!</strong><br>
+                            • All connections terminated<br>
+                            • Device will shut down completely<br>
+                            • To restart: Press PHYSICAL POWER BUTTON<br>
+                            • No remote restart possible
+                        </div>
+                    `;
+                    status.innerHTML = '<span style="color:#ff5555">✓ Power off command sent</span>';
+                    
+                    // Start shutdown countdown
+                    let countdown = 10;
+                    const countdownEl = document.getElementById('poweroff-countdown');
+                    const countdownInterval = setInterval(() => {
+                        countdown--;
+                        countdownEl.textContent = `SHUTTING DOWN... ${countdown}s`;
+                        
+                        if (countdown <= 0) {
+                            clearInterval(countdownInterval);
+                            countdownEl.textContent = "DEVICE POWERED OFF";
+                            countdownEl.style.color = "#ff0000";
+                            
+                            // Final warning message
+                            setTimeout(() => {
+                                output.innerHTML += `
+                                    <div class="error" style="text-align: center; font-size: 1.2em;">
+                                        <strong>DEVICE IS NOW POWERED OFF</strong><br>
+                                        Physical intervention required to restart
+                                    </div>
+                                `;
+                            }, 1000);
+                        }
+                    }, 1000);
+                    
+                } else if (result.success && result.data && result.data.includes('"result":0')) {
+                    output.innerHTML += `
+                        <div class="error">
+                            ✗ Power off command rejected by device
+                        </div>
+                    `;
+                    status.innerHTML = '<span style="color:#ff5555">✗ Power off rejected</span>';
+                } else if (!result.success) {
+                    output.innerHTML += `
+                        <div class="error">
+                            ✗ Power off failed: ${result.error}
+                        </div>
+                    `;
+                    status.innerHTML = `<span style="color:#ff5555">✗ Error: ${result.error}</span>`;
+                } else {
+                    output.innerHTML += `
+                        <div class="error">
+                            ✗ Unexpected response from device
+                        </div>
+                    `;
+                    status.innerHTML = '<span style="color:#ff5555">✗ Unexpected response</span>';
+                }
+                
+            } catch (e) {
+                output.innerHTML += `
+                    <div class="error">
+                        ✗ Power off failed: ${e.message}
+                    </div>
+                `;
+                status.innerHTML = `<span style="color:#ff5555">✗ Error: ${e.message}</span>`;
+            }
+        }
+
+        async function testConnection() {
+            const status = document.getElementById('status');
+            const debugOutput = document.getElementById('debug-output');
+            
+            status.innerHTML = '<span style="color:#ffff00">⏳ Testing connection...</span>';
+            
+            try {
+                // Test basic connectivity
+                const testRes = await fetch(`http://${host}/`, {
+                    method: 'HEAD',
+                    headers: { 'Referer': `http://${host}/` }
+                });
+                
+                debugOutput.innerHTML = `
+                    <div class="success">
+                        ✓ Basic connectivity OK: ${testRes.status} ${testRes.statusText}
+                    </div>
+                    <div class="cookie-display">
+                        <strong>Current cookies:</strong><br>
+                        check_cookie: ${currentCookies.check_cookie}<br>
+                        tpweb_token: ${currentCookies.tpweb_token || 'Not set'}
+                    </div>
+                    <div class="cookie-display">
+                        <strong>Current token:</strong><br>
+                        ${currentToken || 'Not set'}
+                    </div>
+                `;
+                
+                status.innerHTML = '<span style="color:#00ff00">✓ Connection test passed</span>';
+                
+            } catch (e) {
+                debugOutput.innerHTML = `
+                    <div class="error">
+                        ✗ Connection test failed: ${e.message}
+                    </div>
+                `;
+                status.innerHTML = `<span style="color:#ff5555">✗ Connection failed</span>`;
+            }
+        }
+
+        function dumpCookies() {
+            const debugOutput = document.getElementById('debug-output');
+            
+            debugOutput.innerHTML = `
+                <div class="warning">
+                    <strong>Power Control Commands:</strong>
+                </div>
+                <div class="debug-info">
+                    <strong>REBOOT:</strong>
+                    {"token":"${currentToken}","module":"reboot","action":0}
+                    
+                    <strong>POWER OFF:</strong>
+                    {"token":"${currentToken}","module":"reboot","action":1}
+                    
+                    <strong>COOKIES REQUIRED:</strong>
+                    • check_cookie=check_cookie
+                    • tpweb_token=${currentCookies.tpweb_token}
+                </div>
+                <div class="cookie-display">
+                    Full cookie string:<br>
+                    check_cookie=${currentCookies.check_cookie}; tpweb_token=${currentCookies.tpweb_token || '[MISSING]'}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
+
+                    {"token":"${currentToken}","module":"reboot","action":0}
+                    
+                    <strong>POWER OFF:</strong>
+                    {"token":"${currentToken}","module":"reboot","action":1}
+                    
+                    <strong>COOKIES REQUIRED:</strong>
+                    • check_cookie=check_cookie
+                    • tpweb_token=${currentCookies.tpweb_token}
+                </div>
+                <div class="cookie-display">
+                    Full cookie string:<br>
+                    check_cookie=${currentCookies.check_cookie}; tpweb_token=${currentCookies.tpweb_token || '[MISSING]'}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
