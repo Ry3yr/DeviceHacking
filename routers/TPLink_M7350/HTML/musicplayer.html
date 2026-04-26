@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Router Music Player</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            background: #121212;
+            font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, 'Roboto', monospace;
+            margin: 0;
+            padding: 20px;
+            color: #e0e0e0;
+        }
+        .player-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: #1e1e2f;
+            border-radius: 2rem;
+            box-shadow: 0 20px 35px -12px rgba(0,0,0,0.5);
+            overflow: hidden;
+            border: 1px solid #2c2c3a;
+        }
+        .player-header {
+            background: #0f0f1a;
+            padding: 1.2rem 2rem;
+            border-bottom: 1px solid #2c2c3a;
+        }
+        .player-header h1 {
+            margin: 0 0 0.3rem 0;
+            font-size: 1.7rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #ffffff, #aaadff);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        .sub {
+            font-size: 0.8rem;
+            color: #9a9ac0;
+            font-family: monospace;
+        }
+        .dashboard {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            padding: 1.8rem 2rem 2rem 2rem;
+        }
+        .folders-panel {
+            flex: 2;
+            min-width: 280px;
+            background: #151521;
+            border-radius: 1.5rem;
+            padding: 1rem;
+            border: 1px solid #2a2a36;
+            display: flex;
+            flex-direction: column;
+        }
+        .folders-panel h3 {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1.2rem;
+            border-left: 4px solid #6c5ce7;
+            padding-left: 12px;
+        }
+        .breadcrumb {
+            font-size: 0.75rem;
+            padding: 8px 12px;
+            background: #0c0c16;
+            border-radius: 0.8rem;
+            margin-bottom: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 5px;
+            font-family: monospace;
+        }
+        .breadcrumb a {
+            color: #6c5ce7;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .breadcrumb a:hover {
+            text-decoration: underline;
+        }
+        .breadcrumb span {
+            color: #888;
+        }
+        .folder-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 420px;
+            overflow-y: auto;
+            padding-right: 4px;
+            flex: 1;
+        }
+        .folder-item, .file-item {
+            background: #1e1e2c;
+            border-radius: 1rem;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.2s ease;
+            border: 1px solid #2c2c3e;
+        }
+        .folder-item {
+            cursor: pointer;
+        }
+        .folder-item:hover {
+            background: #2a2a3a;
+            border-color: #6c5ce7;
+            transform: translateX(3px);
+        }
+        .file-item {
+            cursor: default;
+            opacity: 0.8;
+        }
+        .folder-name, .file-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-family: 'Courier New', monospace;
+            word-break: break-all;
+            flex: 1;
+        }
+        .folder-name:before {
+            content: "📁";
+            font-size: 1.1rem;
+        }
+        .file-name:before {
+            content: "🎵";
+            font-size: 1.1rem;
+        }
+        .add-folder-btn {
+            background: #2c2c3f;
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 30px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: 0.2s;
+            font-weight: 500;
+        }
+        .add-folder-btn:hover {
+            background: #6c5ce7;
+            transform: scale(0.98);
+        }
+        .queue-panel {
+            flex: 2.5;
+            min-width: 280px;
+            background: #151521;
+            border-radius: 1.5rem;
+            padding: 1rem;
+            border: 1px solid #2a2a36;
+            display: flex;
+            flex-direction: column;
+        }
+        .queue-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 0.8rem;
+            flex-wrap: wrap;
+        }
+        .queue-header h3 {
+            margin: 0;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .queue-actions button {
+            background: #2c2c3e;
+            border: none;
+            color: #ddd;
+            padding: 5px 12px;
+            border-radius: 40px;
+            font-size: 0.7rem;
+            margin-left: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .queue-actions button:hover {
+            background: #4a4a6a;
+        }
+        .queue-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            overflow-y: auto;
+            max-height: 320px;
+            background: #0e0e18;
+            border-radius: 1rem;
+        }
+        .queue-track {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            border-bottom: 1px solid #262633;
+            cursor: pointer;
+            transition: 0.1s;
+            font-size: 0.85rem;
+        }
+        .queue-track:hover {
+            background: #252538;
+        }
+        .queue-track.active-track {
+            background: #6c5ce7;
+            color: white;
+            border-radius: 0.6rem;
+            margin: 2px 5px;
+            padding: 8px 10px;
+        }
+        .track-info {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex: 1;
+        }
+        .track-title {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .track-folder {
+            font-size: 0.65rem;
+            opacity: 0.7;
+            font-family: monospace;
+        }
+        .remove-track {
+            background: none;
+            border: none;
+            color: #ff8a8a;
+            font-size: 1.2rem;
+            cursor: pointer;
+            opacity: 0.6;
+            margin-left: 8px;
+        }
+        .remove-track:hover {
+            opacity: 1;
+        }
+        .player-controls {
+            flex: 1.2;
+            min-width: 260px;
+            background: #151521;
+            border-radius: 1.5rem;
+            padding: 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            border: 1px solid #2a2a36;
+        }
+        .now-playing {
+            background: #0c0c16;
+            border-radius: 1.2rem;
+            padding: 12px;
+            text-align: center;
+        }
+        .np-title {
+            font-weight: bold;
+            font-size: 1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .np-folder {
+            font-size: 0.7rem;
+            color: #aaa;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 10px 0;
+        }
+        .controls button {
+            background: #2d2d40;
+            border: none;
+            color: white;
+            font-size: 1.6rem;
+            width: 48px;
+            height: 48px;
+            border-radius: 60px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .controls button:hover {
+            background: #6c5ce7;
+            transform: scale(1.03);
+        }
+        .progress-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .progress-bar {
+            flex: 1;
+            height: 5px;
+            background: #2c2c3c;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: #6c5ce7;
+            border-radius: 10px;
+        }
+        .time {
+            font-size: 0.7rem;
+            font-family: monospace;
+        }
+        .volume-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 6px;
+        }
+        input[type="range"] {
+            background: #2c2c3a;
+            height: 3px;
+            border-radius: 5px;
+            -webkit-appearance: none;
+        }
+        input[type="range"]:focus {
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #b9b3ff;
+            cursor: pointer;
+        }
+        .footer-meta {
+            font-size: 0.7rem;
+            text-align: center;
+            padding: 1rem;
+            border-top: 1px solid #23232f;
+            color: #6f6f8f;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f1f2a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a4a6a;
+            border-radius: 6px;
+        }
+        .empty-message {
+            text-align: center;
+            padding: 26px;
+            color: #777;
+            font-style: italic;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #6c5ce7;
+        }
+        button {
+            background: none;
+            border: none;
+        }
+        .status-msg {
+            font-size: 0.7rem;
+            color: #6c5ce7;
+            margin-top: 8px;
+            text-align: center;
+        }
+        .back-button {
+            background: #2c2c3f;
+            border: none;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+        .back-button:hover {
+            background: #6c5ce7;
+        }
+    </style>
+</head>
+<body>
+<div class="player-container">
+    <div class="player-header">
+        <h1>🎵 Router Music Player</h1>
+        <div class="sub">📂 Browse folders · Click (+) to add songs to queue</div>
+    </div>
+    <div class="dashboard">
+        <div class="folders-panel">
+            <h3>📀 File Browser</h3>
+            <div class="breadcrumb" id="breadcrumb">
+                <a id="rootLink">/card/</a>
+            </div>
+            <div class="folder-list" id="folderListContainer">
+                <div class="loading">Loading...</div>
+            </div>
+            <div class="status-msg" id="statusMsg"></div>
+            <div style="margin-top: 12px; font-size: 0.7rem; color:#8a8aae;">
+                💡 Click folder to navigate · Click ➕ to add all songs in that folder to queue
+            </div>
+        </div>
+
+        <div class="queue-panel">
+            <div class="queue-header">
+                <h3>🎧 Play Queue <span id="queueCount">(0)</span></h3>
+                <div class="queue-actions">
+                    <button id="clearQueueBtn">🗑 Clear</button>
+                    <button id="shuffleQueueBtn">🔀 Shuffle</button>
+                </div>
+            </div>
+            <ul class="queue-list" id="queueList">
+                <li class="empty-message">Queue empty. Browse and click ➕ on folders to add songs.</li>
+            </ul>
+        </div>
+
+        <div class="player-controls">
+            <div class="now-playing">
+                <div class="np-title" id="nowPlayingTitle">—</div>
+                <div class="np-folder" id="nowPlayingFolder">Ready</div>
+            </div>
+            <div class="controls">
+                <button id="prevBtn">⏮</button>
+                <button id="playPauseBtn">▶</button>
+                <button id="nextBtn">⏭</button>
+            </div>
+            <div class="progress-container">
+                <span class="time" id="currentTime">0:00</span>
+                <div class="progress-bar" id="progressBar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <span class="time" id="durationTime">0:00</span>
+            </div>
+            <div class="volume-row">
+                <span>🔊</span>
+                <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.7">
+                <span id="volPercent">70%</span>
+            </div>
+            <div style="font-size: 0.7rem; text-align: center; margin-top: 6px;">
+                ⚡ Auto-advance · Queue loops · Android media controls supported
+            </div>
+        </div>
+    </div>
+    <div class="footer-meta">
+        🧩 Serving from /card/ · Supports MP3, WAV, OGG, M4A, FLAC, AAC
+    </div>
+</div>
+
+<script>
+    let musicQueue = [];
+    let currentTrackIndex = -1;
+    let audioElement = new Audio();
+    let isPlaying = false;
+    let currentPath = '/card/';
+    
+    const folderListDiv = document.getElementById('folderListContainer');
+    const breadcrumbDiv = document.getElementById('breadcrumb');
+    const queueListEl = document.getElementById('queueList');
+    const queueCountSpan = document.getElementById('queueCount');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const clearQueueBtn = document.getElementById('clearQueueBtn');
+    const shuffleQueueBtn = document.getElementById('shuffleQueueBtn');
+    const nowPlayingTitle = document.getElementById('nowPlayingTitle');
+    const nowPlayingFolder = document.getElementById('nowPlayingFolder');
+    const progressFill = document.getElementById('progressFill');
+    const progressBar = document.getElementById('progressBar');
+    const currentTimeSpan = document.getElementById('currentTime');
+    const durationTimeSpan = document.getElementById('durationTime');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const volPercentSpan = document.getElementById('volPercent');
+    const statusMsg = document.getElementById('statusMsg');
+    const rootLink = document.getElementById('rootLink');
+    
+    const SUPPORTED_EXTS = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.opus'];
+    
+    function isAudioFile(filename) {
+        let ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
+        return SUPPORTED_EXTS.includes(ext);
+    }
+    
+    function setupMediaSession() {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('play', () => {
+                if (musicQueue.length === 0) return;
+                if (!audioElement.src || currentTrackIndex === -1) {
+                    if (musicQueue.length) playTrackAtIndex(0);
+                    return;
+                }
+                audioElement.play();
+                isPlaying = true;
+                playPauseBtn.textContent = '⏸';
+                updatePlaybackState();
+            });
+            navigator.mediaSession.setActionHandler('pause', () => {
+                audioElement.pause();
+                isPlaying = false;
+                playPauseBtn.textContent = '▶';
+                updatePlaybackState();
+            });
+            navigator.mediaSession.setActionHandler('previoustrack', () => prevTrack());
+            navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack());
+        }
+    }
+    
+    function updateMediaMetadata(track) {
+        if (!('mediaSession' in navigator)) return;
+        if (track) {
+            let title = track.name.replace(/\.[^/.]+$/, "");
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: title,
+                artist: "Router Music",
+                album: track.folder.replace(/\//g, ''),
+                artwork: []
+            });
+        }
+        updatePlaybackState();
+    }
+    
+    function updatePlaybackState() {
+        if (!('mediaSession' in navigator)) return;
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+    
+    function parseDirectoryHTML(htmlText) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, 'text/html');
+        const links = doc.querySelectorAll('a');
+        const folders = [];
+        const files = [];
+        
+        for (let link of links) {
+            let href = link.getAttribute('href');
+            if (href && href !== '../' && href !== '/') {
+                let decodedHref = decodeURIComponent(href);
+                if (decodedHref.endsWith('/')) {
+                    folders.push(decodedHref);
+                } else if (isAudioFile(decodedHref)) {
+                    files.push(decodedHref);
+                }
+            }
+        }
+        return { folders, files };
+    }
+    
+    async function loadPath(path) {
+        folderListDiv.innerHTML = '<div class="loading">📡 Loading ' + path + '...</div>';
+        try {
+            const response = await fetch(path, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const htmlText = await response.text();
+            const { folders, files } = parseDirectoryHTML(htmlText);
+            
+            updateBreadcrumb(path);
+            
+            if (folders.length === 0 && files.length === 0) {
+                folderListDiv.innerHTML = '<div class="empty-message">📭 Empty folder</div>';
+                return;
+            }
+            
+            folderListDiv.innerHTML = '';
+            
+            for (let folder of folders) {
+                const folderDiv = document.createElement('div');
+                folderDiv.className = 'folder-item';
+                folderDiv.innerHTML = `
+                    <div class="folder-name">${escapeHtml(folder)}</div>
+                    <button class="add-folder-btn" data-folder="${folder}">➕ Add</button>
+                `;
+                const addBtn = folderDiv.querySelector('.add-folder-btn');
+                addBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    await addFolderToQueue(path, folder);
+                });
+                folderDiv.addEventListener('click', () => {
+                    navigateToFolder(path, folder);
+                });
+                folderListDiv.appendChild(folderDiv);
+            }
+            
+            for (let file of files) {
+                const fileDiv = document.createElement('div');
+                fileDiv.className = 'file-item';
+                fileDiv.innerHTML = `
+                    <div class="file-name">${escapeHtml(file)}</div>
+                    <button class="add-folder-btn" style="opacity:0.5; cursor:default;" disabled>🎵</button>
+                `;
+                folderListDiv.appendChild(fileDiv);
+            }
+            
+        } catch (err) {
+            console.error(err);
+            folderListDiv.innerHTML = '<div class="empty-message">❌ Error loading folder</div>';
+        }
+    }
+    
+    function navigateToFolder(currentPath, folderName) {
+        let newPath = currentPath;
+        if (!newPath.endsWith('/')) newPath += '/';
+        newPath += folderName;
+        currentPath = newPath;
+        loadPath(currentPath);
+    }
+    
+    function updateBreadcrumb(path) {
+        breadcrumbDiv.innerHTML = '';
+        const parts = path.replace(/^\/card\//, '').split('/').filter(p => p);
+        const homeLink = document.createElement('a');
+        homeLink.textContent = '/card/';
+        homeLink.style.cursor = 'pointer';
+        homeLink.onclick = () => {
+            currentPath = '/card/';
+            loadPath(currentPath);
+        };
+        breadcrumbDiv.appendChild(homeLink);
+        
+        let accumulated = '/card/';
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            if (!part) continue;
+            accumulated += part + '/';
+            breadcrumbDiv.appendChild(document.createTextNode(' / '));
+            const link = document.createElement('a');
+            link.textContent = part + '/';
+            link.style.cursor = 'pointer';
+            link.onclick = (function(pathToLoad) {
+                return function() {
+                    currentPath = pathToLoad;
+                    loadPath(currentPath);
+                };
+            })(accumulated);
+            breadcrumbDiv.appendChild(link);
+        }
+    }
+    
+    async function addFolderToQueue(parentPath, folderName) {
+        let folderUrl = parentPath;
+        if (!folderUrl.endsWith('/')) folderUrl += '/';
+        folderUrl += folderName;
+        
+        statusMsg.textContent = `Scanning ${folderName}...`;
+        
+        try {
+            const response = await fetch(folderUrl, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const htmlText = await response.text();
+            const { files } = parseDirectoryHTML(htmlText);
+            
+            const tracks = [];
+            for (let file of files) {
+                if (isAudioFile(file)) {
+                    tracks.push({
+                        name: file,
+                        folder: folderUrl.replace('/card/', ''),
+                        url: folderUrl + file
+                    });
+                }
+            }
+            
+            if (tracks.length === 0) {
+                statusMsg.textContent = `❌ No audio files in ${folderName}`;
+                setTimeout(() => { statusMsg.textContent = ''; }, 2000);
+                return;
+            }
+            
+            const wasEmpty = musicQueue.length === 0;
+            musicQueue.push(...tracks);
+            renderQueue();
+            
+            if (wasEmpty && musicQueue.length > 0 && currentTrackIndex === -1) {
+                currentTrackIndex = 0;
+                renderQueue();
+            }
+            
+            statusMsg.textContent = `✅ Added ${tracks.length} songs from ${folderName}`;
+            setTimeout(() => { statusMsg.textContent = ''; }, 2000);
+            
+        } catch (err) {
+            console.error(err);
+            statusMsg.textContent = `❌ Failed to scan ${folderName}`;
+            setTimeout(() => { statusMsg.textContent = ''; }, 2000);
+        }
+    }
+    
+    function renderQueue() {
+        queueCountSpan.innerText = `(${musicQueue.length})`;
+        if (musicQueue.length === 0) {
+            queueListEl.innerHTML = '<li class="empty-message">🎼 Queue empty. Browse and click ➕ on folders to add songs.</li>';
+            return;
+        }
+        
+        queueListEl.innerHTML = '';
+        musicQueue.forEach((track, idx) => {
+            const li = document.createElement('li');
+            li.className = 'queue-track';
+            if (idx === currentTrackIndex) li.classList.add('active-track');
+            li.innerHTML = `
+                <div class="track-info">
+                    <div class="track-title">${escapeHtml(track.name)}</div>
+                    <div class="track-folder">📁 ${escapeHtml(track.folder)}</div>
+                </div>
+                <button class="remove-track" data-index="${idx}">✖</button>
+            `;
+            const removeBtn = li.querySelector('.remove-track');
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeFromQueue(idx);
+            });
+            li.addEventListener('click', () => {
+                playTrackAtIndex(idx);
+            });
+            queueListEl.appendChild(li);
+        });
+    }
+    
+    function removeFromQueue(index) {
+        if (index < 0 || index >= musicQueue.length) return;
+        const wasPlayingCurrent = (currentTrackIndex === index && isPlaying);
+        musicQueue.splice(index, 1);
+        
+        if (musicQueue.length === 0) {
+            currentTrackIndex = -1;
+            audioElement.pause();
+            isPlaying = false;
+            playPauseBtn.textContent = '▶';
+            nowPlayingTitle.textContent = '—';
+            nowPlayingFolder.textContent = 'Ready';
+            updateMediaMetadata(null);
+            renderQueue();
+            return;
+        }
+        
+        if (currentTrackIndex > index) {
+            currentTrackIndex--;
+        } else if (currentTrackIndex === index) {
+            if (currentTrackIndex < musicQueue.length) {
+                playTrackAtIndex(currentTrackIndex);
+            } else if (musicQueue.length > 0) {
+                playTrackAtIndex(musicQueue.length - 1);
+            }
+        }
+        
+        renderQueue();
+        if (wasPlayingCurrent && currentTrackIndex !== -1 && musicQueue[currentTrackIndex]) {
+            playTrackAtIndex(currentTrackIndex);
+        }
+    }
+    
+    function playTrackAtIndex(index) {
+        if (index < 0 || index >= musicQueue.length) return;
+        currentTrackIndex = index;
+        const track = musicQueue[currentTrackIndex];
+        if (!track) return;
+        
+        audioElement.src = track.url;
+        audioElement.load();
+        audioElement.play().then(() => {
+            isPlaying = true;
+            playPauseBtn.textContent = '⏸';
+            nowPlayingTitle.textContent = track.name;
+            nowPlayingFolder.textContent = `from ${track.folder}`;
+            updateMediaMetadata(track);
+            updatePlaybackState();
+        }).catch(e => {
+            console.warn("Playback error:", e);
+            isPlaying = false;
+            playPauseBtn.textContent = '▶';
+            nowPlayingTitle.textContent = track.name;
+            nowPlayingFolder.textContent = `from ${track.folder} (tap play)`;
+        });
+        renderQueue();
+    }
+    
+    function clearQueue() {
+        musicQueue = [];
+        currentTrackIndex = -1;
+        audioElement.pause();
+        isPlaying = false;
+        playPauseBtn.textContent = '▶';
+        audioElement.src = '';
+        nowPlayingTitle.textContent = '—';
+        nowPlayingFolder.textContent = 'Ready';
+        updateMediaMetadata(null);
+        renderQueue();
+        statusMsg.textContent = '🗑 Queue cleared';
+        setTimeout(() => { statusMsg.textContent = ''; }, 1500);
+    }
+    
+    function shuffleQueue() {
+        if (musicQueue.length <= 1) return;
+        for (let i = musicQueue.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [musicQueue[i], musicQueue[j]] = [musicQueue[j], musicQueue[i]];
+        }
+        if (currentTrackIndex !== -1) {
+            const currentUrl = musicQueue[currentTrackIndex]?.url;
+            const newIdx = musicQueue.findIndex(t => t.url === currentUrl);
+            currentTrackIndex = newIdx !== -1 ? newIdx : 0;
+        } else if (musicQueue.length > 0) {
+            currentTrackIndex = 0;
+        }
+        renderQueue();
+        if (currentTrackIndex !== -1 && isPlaying) {
+            playTrackAtIndex(currentTrackIndex);
+        }
+        statusMsg.textContent = '🔀 Queue shuffled';
+        setTimeout(() => { statusMsg.textContent = ''; }, 1500);
+    }
+    
+    function nextTrack() {
+        if (musicQueue.length === 0) return;
+        let nextIdx = currentTrackIndex + 1;
+        if (nextIdx >= musicQueue.length) nextIdx = 0;
+        playTrackAtIndex(nextIdx);
+    }
+    
+    function prevTrack() {
+        if (musicQueue.length === 0) return;
+        let prevIdx = currentTrackIndex - 1;
+        if (prevIdx < 0) prevIdx = musicQueue.length - 1;
+        playTrackAtIndex(prevIdx);
+    }
+    
+    function escapeHtml(str) {
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+    
+    function formatTime(secs) {
+        if (isNaN(secs) || !isFinite(secs)) return "0:00";
+        let mins = Math.floor(secs / 60);
+        let seconds = Math.floor(secs % 60);
+        return mins + ":" + (seconds < 10 ? '0' : '') + seconds;
+    }
+    
+    audioElement.addEventListener('timeupdate', () => {
+        if (audioElement.duration && !isNaN(audioElement.duration)) {
+            const percent = (audioElement.currentTime / audioElement.duration) * 100;
+            progressFill.style.width = percent + '%';
+            currentTimeSpan.textContent = formatTime(audioElement.currentTime);
+        }
+    });
+    
+    audioElement.addEventListener('loadedmetadata', () => {
+        durationTimeSpan.textContent = formatTime(audioElement.duration);
+    });
+    
+    audioElement.addEventListener('ended', () => {
+        nextTrack();
+    });
+    
+    audioElement.addEventListener('play', () => {
+        isPlaying = true;
+        playPauseBtn.textContent = '⏸';
+        updatePlaybackState();
+    });
+    
+    audioElement.addEventListener('pause', () => {
+        isPlaying = false;
+        playPauseBtn.textContent = '▶';
+        updatePlaybackState();
+    });
+    
+    progressBar.addEventListener('click', (e) => {
+        const rect = progressBar.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        if (audioElement.duration) {
+            audioElement.currentTime = percent * audioElement.duration;
+        }
+    });
+    
+    volumeSlider.addEventListener('input', (e) => {
+        audioElement.volume = parseFloat(e.target.value);
+        volPercentSpan.innerText = Math.round(audioElement.volume * 100) + '%';
+    });
+    
+    playPauseBtn.addEventListener('click', () => {
+        if (musicQueue.length === 0) return;
+        if (!audioElement.src || currentTrackIndex === -1) {
+            if (musicQueue.length) playTrackAtIndex(0);
+            return;
+        }
+        if (isPlaying) {
+            audioElement.pause();
+        } else {
+            audioElement.play();
+        }
+    });
+    
+    nextBtn.addEventListener('click', nextTrack);
+    prevBtn.addEventListener('click', prevTrack);
+    clearQueueBtn.addEventListener('click', clearQueue);
+    shuffleQueueBtn.addEventListener('click', shuffleQueue);
+    rootLink.onclick = () => {
+        currentPath = '/card/';
+        loadPath(currentPath);
+    };
+    
+    audioElement.volume = 0.7;
+    volumeSlider.value = 0.7;
+    volPercentSpan.innerText = '70%';
+    
+    setupMediaSession();
+    loadPath('/card/');
+</script>
+</body>
+</html>
