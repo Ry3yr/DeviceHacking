@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>VidroFlix · Lazy thumbnails + fixed Movies button</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0b0f1c;
+            font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+            color: #edeef2;
+            padding: 0 1.5rem 3rem 1.5rem;
+        }
+        .top-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1.5rem 0 1rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            margin-bottom: 1.8rem;
+        }
+        .logo-area {
+            display: flex;
+            align-items: baseline;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+        h1 {
+            font-weight: 700;
+            font-size: 1.8rem;
+            letter-spacing: -0.3px;
+            background: linear-gradient(135deg, #e6e9ff, #b9c3ff);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+        }
+        .badge {
+            background: #1e2a3e;
+            border-radius: 40px;
+            padding: 0.2rem 0.8rem;
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: #9ab3d5;
+        }
+        .root-switch {
+            display: flex;
+            gap: 0.75rem;
+            background: #11151f;
+            padding: 0.3rem;
+            border-radius: 60px;
+        }
+        .root-btn {
+            background: transparent;
+            border: none;
+            padding: 0.5rem 1.3rem;
+            border-radius: 40px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            color: #b9c7dd;
+            transition: all 0.2s ease;
+        }
+        .root-btn.active {
+            background: #2d3e5f;
+            color: white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        .root-btn:hover:not(.active) {
+            background: #1f2a3f;
+            color: #eef3ff;
+        }
+        .breadcrumb {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.4rem;
+            margin-bottom: 2rem;
+            font-size: 0.85rem;
+            background: #0f131e80;
+            padding: 0.5rem 1rem;
+            border-radius: 44px;
+            backdrop-filter: blur(4px);
+        }
+        .breadcrumb a {
+            color: #adc0f0;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .breadcrumb a:hover { color: white; text-decoration: underline; }
+        .media-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(190px, 220px));
+            gap: 1.8rem;
+            justify-content: center;
+            margin-top: 0.5rem;
+        }
+        .card {
+            background: #10131f;
+            border-radius: 1rem;
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s;
+            cursor: pointer;
+            border: 1px solid #252b3d;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.4);
+            position: relative;
+        }
+        .card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 16px 28px rgba(0, 0, 0, 0.6);
+            border-color: #3e4a6b;
+        }
+        .card-preview {
+            aspect-ratio: 16 / 9;
+            background: #070a12;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+        .thumbnail-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+        }
+        .thumbnail-img.loaded {
+            opacity: 1;
+        }
+        .play-icon-overlay {
+            position: absolute;
+            background: rgba(0,0,0,0.6);
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+            z-index: 2;
+        }
+        .resume-badge {
+            position: absolute;
+            bottom: 6px;
+            right: 8px;
+            background: #e67e22dd;
+            font-size: 0.7rem;
+            font-weight: bold;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            backdrop-filter: blur(4px);
+            color: white;
+            z-index: 2;
+        }
+        .watched-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #2e7d32ee;
+            border-radius: 30px;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: white;
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            z-index: 3;
+        }
+        .card-info {
+            padding: 0.8rem 0.8rem 1rem 0.8rem;
+        }
+        .card-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #f0f3fc;
+        }
+        .card-sub {
+            font-size: 0.7rem;
+            color: #8e9fc3;
+            margin-top: 0.25rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .loader {
+            text-align: center;
+            padding: 3rem;
+            font-size: 1.2rem;
+            color: #8f9fc7;
+        }
+        .spinner {
+            border: 3px solid #262e44;
+            border-top: 3px solid #7f9cf5;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 0.8s linear infinite;
+            margin: 1rem auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .empty-msg {
+            text-align: center;
+            padding: 3rem;
+            background: #0d1220;
+            border-radius: 2rem;
+            margin: 2rem;
+            color: #bbccff;
+        }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.94);
+            backdrop-filter: blur(14px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            visibility: hidden;
+            opacity: 0;
+            transition: visibility 0.2s, opacity 0.2s;
+        }
+        .modal.active {
+            visibility: visible;
+            opacity: 1;
+        }
+        .video-container {
+            width: 90%;
+            max-width: 1150px;
+            background: #000000cc;
+            border-radius: 28px;
+            overflow: hidden;
+            box-shadow: 0 25px 45px rgba(0,0,0,0.6);
+            position: relative;
+        }
+        .video-container video {
+            width: 100%;
+            max-height: 80vh;
+            display: block;
+            background: black;
+        }
+        .close-modal {
+            position: absolute;
+            top: 12px;
+            right: 20px;
+            background: #1e243b;
+            border: none;
+            font-size: 1.8rem;
+            line-height: 1;
+            color: white;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.1s;
+            z-index: 15;
+        }
+        .close-modal:hover { background: #c44536; }
+        .player-control-bar {
+            background: #0f121ee6;
+            padding: 0.6rem 1rem;
+            display: flex;
+            gap: 0.8rem;
+            align-items: center;
+            justify-content: flex-end;
+            backdrop-filter: blur(8px);
+            border-top: 1px solid #2a2f44;
+        }
+        .control-btn {
+            background: #1e2a3e;
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 40px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .control-btn.mark-watched { background: #2e7d32; }
+        .control-btn.mark-watched:hover { background: #1b5e20; }
+        .control-btn.save-exit { background: #e67e22; }
+        .control-btn.save-exit:hover { background: #b45f1b; }
+        .resume-prompt {
+            background: #0f121ee6;
+            padding: 0.8rem 1.2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid #2a2f44;
+        }
+        .resume-text { font-size: 0.9rem; font-weight: 500; }
+        .resume-buttons { display: flex; gap: 0.8rem; }
+        .resume-btn {
+            background: #2c3e66;
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 40px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .resume-btn.start-over { background: #404b6e; }
+        .resume-btn.resume-play { background: #e67e22; }
+        @media (max-width: 640px) {
+            body { padding: 0 1rem 2rem 1rem; }
+            .media-grid { gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+<div class="top-bar">
+    <div class="logo-area">
+        <h1>▸ VidroFlix</h1>
+        <div class="badge">📸 lazy thumbnails · cache · fixed Movies</div>
+    </div>
+    <div class="root-switch" id="rootSwitch">
+        <button class="root-btn active" data-root="series">📺 TV Series</button>
+        <button class="root-btn" data-root="movies">🎬 Movies</button>
+    </div>
+</div>
+<div class="breadcrumb" id="breadcrumb"></div>
+<div id="gridContainer" class="media-grid"></div>
+
+<div id="videoModal" class="modal">
+    <div class="video-container">
+        <button class="close-modal" id="closeModalBtn">✕</button>
+        <div id="resumePromptArea" style="display: none;" class="resume-prompt"></div>
+        <video id="modalVideo" controls></video>
+        <div class="player-control-bar">
+            <button id="markWatchedBtn" class="control-btn mark-watched">○ Mark as Watched</button>
+            <button id="saveAndExitBtn" class="control-btn save-exit">✕ Save & Exit</button>
+        </div>
+        <div class="modal-info" id="modalFilename"></div>
+    </div>
+</div>
+
+<script>
+    (function() {
+        const ORIGIN = window.location.origin;
+        const SERIES_BASE = "/card/Videos/1_Serien/";
+        const MOVIES_BASE = "/card/Videos/Movies/";
+        let currentRootPath = SERIES_BASE;
+        let currentFullUrl = "";
+        let isLoading = false;
+
+        // --- STORAGE KEYS ---
+        const STORAGE_WATCHED = "vidroflix_watched_videos";
+        const STORAGE_RESUME = "vidroflix_resume_points";
+        const STORAGE_THUMB_CACHE = "vidroflix_thumb_cache";
+
+        function getWatchedSet() {
+            const raw = localStorage.getItem(STORAGE_WATCHED);
+            if (!raw) return new Set();
+            try { return new Set(JSON.parse(raw)); } catch(e) { return new Set(); }
+        }
+        function isVideoWatched(videoUrl) { return getWatchedSet().has(videoUrl); }
+        function markVideoAsWatched(videoUrl) {
+            const watched = getWatchedSet();
+            if (!watched.has(videoUrl)) {
+                watched.add(videoUrl);
+                localStorage.setItem(STORAGE_WATCHED, JSON.stringify([...watched]));
+                clearResumePoint(videoUrl);
+                return true;
+            }
+            return false;
+        }
+        function unmarkWatched(videoUrl) {
+            const watched = getWatchedSet();
+            if (watched.has(videoUrl)) {
+                watched.delete(videoUrl);
+                localStorage.setItem(STORAGE_WATCHED, JSON.stringify([...watched]));
+            }
+        }
+        function getResumeData() {
+            const raw = localStorage.getItem(STORAGE_RESUME);
+            if (!raw) return {};
+            try { return JSON.parse(raw); } catch(e) { return {}; }
+        }
+        function saveResumePoint(videoUrl, positionSec, title) {
+            if (isNaN(positionSec) || positionSec < 0) return;
+            const data = getResumeData();
+            data[videoUrl] = { position: Math.floor(positionSec), timestamp: Date.now(), title: title || "Unknown" };
+            localStorage.setItem(STORAGE_RESUME, JSON.stringify(data));
+            if (isVideoWatched(videoUrl)) unmarkWatched(videoUrl);
+        }
+        function clearResumePoint(videoUrl) {
+            const data = getResumeData();
+            if (data[videoUrl]) { delete data[videoUrl]; localStorage.setItem(STORAGE_RESUME, JSON.stringify(data)); }
+        }
+        function getResumePosition(videoUrl) { return getResumeData()[videoUrl]?.position || null; }
+
+        // --- THUMBNAIL CACHE (localStorage) ---
+        function getCachedThumb(key) {
+            try {
+                const cache = JSON.parse(localStorage.getItem(STORAGE_THUMB_CACHE) || "{}");
+                return cache[key] || null;
+            } catch(e) { return null; }
+        }
+        function setCachedThumb(key, dataURL) {
+            try {
+                const cache = JSON.parse(localStorage.getItem(STORAGE_THUMB_CACHE) || "{}");
+                cache[key] = dataURL;
+                const entries = Object.entries(cache);
+                if (entries.length > 150) {
+                    const sorted = entries.sort((a,b) => (b[1]?.timestamp||0) - (a[1]?.timestamp||0));
+                    const newCache = Object.fromEntries(sorted.slice(0, 100));
+                    localStorage.setItem(STORAGE_THUMB_CACHE, JSON.stringify(newCache));
+                } else {
+                    localStorage.setItem(STORAGE_THUMB_CACHE, JSON.stringify(cache));
+                }
+            } catch(e) { console.warn("cache error", e); }
+        }
+
+        // --- HELPERS ---
+        function safeJoinUrl(baseUrl, relativePath) {
+            if (!baseUrl) return relativePath;
+            if (relativePath.startsWith("http")) return relativePath;
+            if (relativePath.startsWith("/")) return ORIGIN + relativePath;
+            let base = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
+            return base + relativePath;
+        }
+
+        // --- PARSE DIRECTORY LISTING (lighttpd) ---
+        function parseDirectoryListing(html, baseUrl) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+            const table = doc.querySelector("table.list, table");
+            if (!table) return [];
+            const tbody = table.querySelector("tbody") || table;
+            const rows = tbody.querySelectorAll("tr");
+            const items = [];
+            for (const row of rows) {
+                const nameCell = row.querySelector("td.n");
+                if (!nameCell) continue;
+                const anchor = nameCell.querySelector("a");
+                if (!anchor) continue;
+                let href = anchor.getAttribute("href");
+                let rawName = anchor.textContent.trim();
+                const allTds = row.querySelectorAll("td");
+                const typeCell = allTds.length >= 4 ? allTds[3] : null;
+                let typeText = typeCell ? typeCell.textContent.trim() : "";
+                const isDirectory = (href && href.endsWith("/")) || typeText.includes("Directory");
+                
+                if (rawName === "Parent Directory" || href === "../") {
+                    let parentUrl = baseUrl ? baseUrl.replace(/\/$/, "").replace(/\/[^/]*$/, "") + "/" : "../";
+                    items.push({ type: "parent", name: ".. ⬆  Parent", url: parentUrl });
+                    continue;
+                }
+                if (isDirectory) {
+                    let dirDisplay = rawName.replace(/\/$/, "");
+                    if (dirDisplay.length && dirDisplay[0] >= '0' && dirDisplay[0] <= '9') continue;
+                    const dirUrl = safeJoinUrl(baseUrl, href);
+                    items.push({ type: "dir", name: dirDisplay, url: dirUrl });
+                } else {
+                    if (href.toLowerCase().endsWith(".mp4")) {
+                        const fileUrl = safeJoinUrl(baseUrl, href);
+                        let fileName = rawName.replace(/\.mp4$/i, "");
+                        items.push({ type: "video", name: fileName, url: fileUrl, fullName: rawName });
+                    }
+                }
+            }
+            return items;
+        }
+
+        async function fetchDirectoryContents(dirUrl) {
+            const resp = await fetch(dirUrl, { credentials: "same-origin", headers: { "Accept": "text/html" } });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status} – ${resp.statusText}`);
+            const html = await resp.text();
+            return parseDirectoryListing(html, dirUrl);
+        }
+
+        // --- THUMBNAIL GENERATION (from video) ---
+        async function getVideoThumbnail(videoUrl) {
+            const cacheKey = `video_${videoUrl}`;
+            const cached = getCachedThumb(cacheKey);
+            if (cached) return cached;
+            
+            return new Promise((resolve) => {
+                const video = document.createElement("video");
+                video.preload = "metadata";
+                video.src = videoUrl;
+                video.muted = true;
+                video.currentTime = 2;
+                let resolved = false;
+                const finish = (dataURL) => {
+                    if (resolved) return;
+                    resolved = true;
+                    if (dataURL) setCachedThumb(cacheKey, dataURL);
+                    resolve(dataURL);
+                    video.pause();
+                    video.src = "";
+                    video.load();
+                };
+                video.addEventListener("loadedmetadata", () => {
+                    const dur = video.duration;
+                    let seekTarget = Math.min(dur * 0.08, 12);
+                    if (isNaN(seekTarget) || seekTarget < 0.5) seekTarget = 3;
+                    video.currentTime = seekTarget;
+                });
+                video.addEventListener("seeked", () => {
+                    try {
+                        const canvas = document.createElement("canvas");
+                        canvas.width = 320;
+                        canvas.height = 180;
+                        const ctx = canvas.getContext("2d");
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const dataURL = canvas.toDataURL("image/jpeg", 0.7);
+                        finish(dataURL);
+                    } catch(e) { finish(null); }
+                });
+                video.addEventListener("error", () => finish(null));
+                video.load();
+                setTimeout(() => finish(null), 4000);
+            });
+        }
+
+        // For folders: try thumb.png, else first video
+        async function getFolderThumbnail(folderUrl, folderName, itemsInFolder = null) {
+            const cacheKey = `folder_${folderUrl}`;
+            const cached = getCachedThumb(cacheKey);
+            if (cached) return cached;
+            
+            const thumbUrl = safeJoinUrl(folderUrl, "thumb.png");
+            try {
+                const imgTest = new Image();
+                const imgPromise = new Promise((resolve) => {
+                    imgTest.onload = () => resolve(true);
+                    imgTest.onerror = () => resolve(false);
+                    imgTest.src = thumbUrl;
+                    setTimeout(() => resolve(false), 1500);
+                });
+                const exists = await imgPromise;
+                if (exists) {
+                    const resp = await fetch(thumbUrl);
+                    const blob = await resp.blob();
+                    const reader = new FileReader();
+                    const dataURL = await new Promise((res) => {
+                        reader.onloadend = () => res(reader.result);
+                        reader.readAsDataURL(blob);
+                    });
+                    setCachedThumb(cacheKey, dataURL);
+                    return dataURL;
+                }
+            } catch(e) { /* fallback */ }
+            
+            if (itemsInFolder && itemsInFolder.length) {
+                const firstVideo = itemsInFolder.find(i => i.type === "video");
+                if (firstVideo) {
+                    const thumb = await getVideoThumbnail(firstVideo.url);
+                    if (thumb) {
+                        setCachedThumb(cacheKey, thumb);
+                        return thumb;
+                    }
+                }
+            }
+            return null;
+        }
+
+        // --- LAZY LOADING OBSERVER ---
+        let thumbnailObserver = null;
+        function observeThumbnails() {
+            if (thumbnailObserver) thumbnailObserver.disconnect();
+            thumbnailObserver = new IntersectionObserver((entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        const dataSrc = img.getAttribute("data-src");
+                        if (dataSrc && !img.src) {
+                            img.src = dataSrc;
+                            img.classList.add("loaded");
+                        }
+                        thumbnailObserver.unobserve(img);
+                    }
+                }
+            }, { rootMargin: "200px" });
+            document.querySelectorAll(".thumbnail-img[data-src]:not([src])").forEach(img => {
+                thumbnailObserver.observe(img);
+            });
+        }
+
+        // --- RENDER GRID ---
+        async function renderGrid(items, currentUrl) {
+            const grid = document.getElementById("gridContainer");
+            grid.innerHTML = "";
+            if (!items.length) {
+                grid.innerHTML = `<div class="empty-msg">📭 No MP4 videos or folders found.<br>Check subdirectories.</div>`;
+                return;
+            }
+            
+            for (const item of items) {
+                const card = document.createElement("div");
+                card.className = "card";
+                const previewDiv = document.createElement("div");
+                previewDiv.className = "card-preview";
+                
+                if (item.type === "dir") {
+                    previewDiv.innerHTML = `📁 <span style="font-size:2rem;">📂</span>`;
+                    const thumbImg = document.createElement("img");
+                    thumbImg.className = "thumbnail-img";
+                    thumbImg.style.opacity = "0";
+                    previewDiv.appendChild(thumbImg);
+                    // lazy load folder thumbnail
+                    (async () => {
+                        let folderItems = null;
+                        try {
+                            const resp = await fetch(item.url, { credentials: "same-origin", headers: { "Accept": "text/html" } });
+                            if (resp.ok) {
+                                const html = await resp.text();
+                                folderItems = parseDirectoryListing(html, item.url);
+                            }
+                        } catch(e) {}
+                        const thumb = await getFolderThumbnail(item.url, item.name, folderItems);
+                        if (thumb) {
+                            thumbImg.setAttribute("data-src", thumb);
+                            thumbImg.style.opacity = "1";
+                            observeThumbnails();
+                        } else {
+                            thumbImg.remove();
+                        }
+                    })();
+                } 
+                else if (item.type === "parent") {
+                    previewDiv.innerHTML = `⬆️ <span style="font-size:2rem;">📁</span>`;
+                } 
+                else if (item.type === "video") {
+                    previewDiv.style.position = "relative";
+                    const overlaySpan = document.createElement("div");
+                    overlaySpan.className = "play-icon-overlay";
+                    overlaySpan.innerHTML = "▶️";
+                    previewDiv.appendChild(overlaySpan);
+                    
+                    const watched = isVideoWatched(item.url);
+                    if (watched) {
+                        const watchedDiv = document.createElement("div");
+                        watchedDiv.className = "watched-badge";
+                        watchedDiv.innerHTML = `<span>✓</span> Watched`;
+                        previewDiv.appendChild(watchedDiv);
+                    } else {
+                        const resumePos = getResumePosition(item.url);
+                        if (resumePos && resumePos > 5) {
+                            const resumeDiv = document.createElement("div");
+                            resumeDiv.className = "resume-badge";
+                            resumeDiv.textContent = `⏸️ ${Math.floor(resumePos/60)}m`;
+                            previewDiv.appendChild(resumeDiv);
+                        }
+                    }
+                    
+                    const thumbImg = document.createElement("img");
+                    thumbImg.className = "thumbnail-img";
+                    previewDiv.appendChild(thumbImg);
+                    (async () => {
+                        const thumb = await getVideoThumbnail(item.url);
+                        if (thumb) {
+                            thumbImg.setAttribute("data-src", thumb);
+                            observeThumbnails();
+                        } else {
+                            thumbImg.remove();
+                            previewDiv.style.background = "#101826";
+                            const fallback = document.createElement("div");
+                            fallback.style.fontSize = "2rem";
+                            fallback.innerText = "🎬";
+                            previewDiv.appendChild(fallback);
+                        }
+                    })();
+                }
+                
+                const infoDiv = document.createElement("div");
+                infoDiv.className = "card-info";
+                const titleSpan = document.createElement("div");
+                titleSpan.className = "card-title";
+                let displayTitle = item.name;
+                if (item.type === "parent") displayTitle = "⋯ Go back";
+                else if (item.type === "dir") displayTitle = item.name;
+                else if (item.type === "video") displayTitle = item.name;
+                titleSpan.textContent = displayTitle;
+                const subSpan = document.createElement("div");
+                subSpan.className = "card-sub";
+                if (item.type === "dir") subSpan.textContent = "folder";
+                else if (item.type === "video") subSpan.textContent = "MP4";
+                else subSpan.textContent = "parent";
+                infoDiv.appendChild(titleSpan);
+                infoDiv.appendChild(subSpan);
+                card.appendChild(previewDiv);
+                card.appendChild(infoDiv);
+                
+                card.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    if (item.type === "dir") loadDirectory(item.url);
+                    else if (item.type === "video") openVideoWithResumeCheck(item.url, item.name);
+                    else if (item.type === "parent") {
+                        let parentUrl = item.url;
+                        const rootAbs = toAbsoluteUrl(currentRootPath);
+                        if (parentUrl === "../" || !parentUrl) parentUrl = new URL("..", currentUrl).href;
+                        const parentPath = parentUrl;
+                        const rootPath = rootAbs;
+                        if (parentPath.startsWith(rootPath) || parentPath === rootPath) loadDirectory(parentPath);
+                        else loadDirectory(rootPath);
+                    }
+                });
+                grid.appendChild(card);
+            }
+            observeThumbnails();
+        }
+
+        function toAbsoluteUrl(path) {
+            if (path.startsWith("http")) return path;
+            return ORIGIN + (path.startsWith("/") ? path : "/" + path);
+        }
+
+        // --- VIDEO PLAYER ---
+        let activeCleanup = null;
+        let currentVideoUrl = null, currentVideoTitle = null;
+        
+        function openVideoWithResumeCheck(videoUrl, title) {
+            const modal = document.getElementById("videoModal");
+            const promptArea = document.getElementById("resumePromptArea");
+            const resumePos = getResumePosition(videoUrl);
+            const isWatched = isVideoWatched(videoUrl);
+            
+            if (!isWatched && resumePos && resumePos > 5) {
+                const minutes = Math.floor(resumePos / 60);
+                const seconds = Math.floor(resumePos % 60);
+                promptArea.innerHTML = `
+                    <div class="resume-text">⏸️ Stopped at ${minutes}:${seconds.toString().padStart(2,'0')}. Resume "${title}"?</div>
+                    <div class="resume-buttons">
+                        <button id="resumeFromPointBtn" class="resume-btn resume-play">▶ Resume</button>
+                        <button id="startOverBtn" class="resume-btn start-over">🔄 Start Over</button>
+                    </div>
+                `;
+                promptArea.style.display = "flex";
+                modal.classList.add("active");
+                const resumeBtn = document.getElementById("resumeFromPointBtn");
+                const startBtn = document.getElementById("startOverBtn");
+                const closeModalAndClean = () => {
+                    modal.classList.remove("active");
+                    promptArea.style.display = "none";
+                    if (resumeBtn) resumeBtn.removeEventListener("click", resumeHandler);
+                    if (startBtn) startBtn.removeEventListener("click", startHandler);
+                };
+                const resumeHandler = () => { closeModalAndClean(); launchPlayer(videoUrl, title, resumePos); };
+                const startHandler = () => { clearResumePoint(videoUrl); closeModalAndClean(); launchPlayer(videoUrl, title, 0); };
+                resumeBtn.addEventListener("click", resumeHandler);
+                startBtn.addEventListener("click", startHandler);
+            } else {
+                launchPlayer(videoUrl, title, 0);
+            }
+        }
+        
+        function launchPlayer(videoUrl, title, startSeconds) {
+            currentVideoUrl = videoUrl;
+            currentVideoTitle = title;
+            const modal = document.getElementById("videoModal");
+            const videoEl = document.getElementById("modalVideo");
+            const filenameSpan = document.getElementById("modalFilename");
+            filenameSpan.textContent = `🎞️ ${title}`;
+            
+            if (activeCleanup) activeCleanup();
+            
+            videoEl.src = videoUrl;
+            videoEl.load();
+            videoEl.currentTime = startSeconds;
+            videoEl.play().catch(e => console.log("autoplay", e));
+            modal.classList.add("active");
+            
+            let lastSave = 0;
+            const onTimeUpdate = () => {
+                if (!videoEl.duration || isNaN(videoEl.duration)) return;
+                const cur = videoEl.currentTime;
+                const dur = videoEl.duration;
+                if (cur > 5 && cur < dur - 5 && Date.now() - lastSave > 5000) {
+                    saveResumePoint(videoUrl, cur, title);
+                    lastSave = Date.now();
+                }
+            };
+            const onEnded = () => {
+                markVideoAsWatched(videoUrl);
+                refreshCurrentView();
+            };
+            videoEl.addEventListener("timeupdate", onTimeUpdate);
+            videoEl.addEventListener("ended", onEnded);
+            
+            const cleanup = () => {
+                if (videoEl.duration && videoEl.currentTime > 0 && !videoEl.ended) {
+                    const cur = videoEl.currentTime;
+                    const dur = videoEl.duration;
+                    if (dur && cur >= dur * 0.95) markVideoAsWatched(videoUrl);
+                    else if (cur > 5) saveResumePoint(videoUrl, cur, title);
+                }
+                videoEl.removeEventListener("timeupdate", onTimeUpdate);
+                videoEl.removeEventListener("ended", onEnded);
+                videoEl.pause();
+                videoEl.src = "";
+                modal.classList.remove("active");
+            };
+            activeCleanup = cleanup;
+            
+            const markBtn = document.getElementById("markWatchedBtn");
+            const saveExitBtn = document.getElementById("saveAndExitBtn");
+            const markHandler = () => {
+                markVideoAsWatched(videoUrl);
+                refreshCurrentView();
+                cleanup();
+            };
+            const saveExitHandler = () => {
+                if (videoEl.currentTime > 5) saveResumePoint(videoUrl, videoEl.currentTime, title);
+                cleanup();
+            };
+            markBtn.addEventListener("click", markHandler);
+            saveExitBtn.addEventListener("click", saveExitHandler);
+            
+            const closeModalHandler = () => {
+                markBtn.removeEventListener("click", markHandler);
+                saveExitBtn.removeEventListener("click", saveExitHandler);
+                cleanup();
+            };
+            const closeBtn = document.getElementById("closeModalBtn");
+            const modalBg = document.getElementById("videoModal");
+            const backdropHandler = (e) => { if (e.target === modalBg) closeModalHandler(); };
+            closeBtn.removeEventListener("click", closeModalHandler);
+            modalBg.removeEventListener("click", backdropHandler);
+            closeBtn.addEventListener("click", closeModalHandler);
+            modalBg.addEventListener("click", backdropHandler);
+        }
+        
+        async function refreshCurrentView() {
+            if (currentFullUrl && !isLoading) await loadDirectory(currentFullUrl);
+        }
+        
+        async function loadDirectory(targetUrl) {
+            if (isLoading) return;
+            isLoading = true;
+            const grid = document.getElementById("gridContainer");
+            grid.innerHTML = `<div class="loader"><div class="spinner"></div><div>loading library ...</div></div>`;
+            try {
+                const items = await fetchDirectoryContents(targetUrl);
+                currentFullUrl = targetUrl;
+                await renderGrid(items, targetUrl);
+                const rootAbs = toAbsoluteUrl(currentRootPath);
+                renderBreadcrumb(targetUrl, rootAbs);
+                // Sync URL bar with browser history
+                const navPathname = (() => { try { return new URL(targetUrl).pathname; } catch(e) { return targetUrl; } })();
+                const navSearch = "?path=" + encodeURIComponent(navPathname);
+                if (isPopState) {
+                    isPopState = false; // back/forward already moved history
+                } else if (firstLoad) {
+                    firstLoad = false;
+                    history.replaceState({ path: navPathname }, "", navSearch);
+                } else {
+                    history.pushState({ path: navPathname }, "", navSearch);
+                }
+            } catch (err) {
+                console.error(err);
+                grid.innerHTML = `<div class="empty-msg">⚠️ Error: ${err.message}<br>Check path or server.</div>`;
+            } finally {
+                isLoading = false;
+            }
+        }
+        
+        function renderBreadcrumb(currentAbsPath, rootBaseAbs) {
+            const container = document.getElementById("breadcrumb");
+            container.innerHTML = "";
+            let pathname = "";
+            try { pathname = new URL(currentAbsPath).pathname; } catch(e) { pathname = currentAbsPath; }
+            const rootPathname = new URL(rootBaseAbs).pathname;
+            const parts = pathname.replace(/\/$/, "").split("/").filter(p => p);
+            const rootParts = rootPathname.replace(/\/$/, "").split("/").filter(p => p);
+            const rootLink = document.createElement("a");
+            rootLink.href = "#";
+            rootLink.textContent = (currentRootPath === SERIES_BASE) ? "📺 Series" : "🎬 Movies";
+            rootLink.addEventListener("click", (e) => { e.preventDefault(); navigateToRoot(currentRootPath === SERIES_BASE ? "series" : "movies"); });
+            container.appendChild(rootLink);
+            let buildPath = rootPathname;
+            for (let i = rootParts.length; i < parts.length; i++) {
+                const part = parts[i];
+                buildPath = buildPath.endsWith("/") ? buildPath + part : buildPath + "/" + part;
+                if (!buildPath.endsWith("/")) buildPath += "/";
+                const sep = document.createElement("span");
+                sep.textContent = " / ";
+                sep.style.color = "#5c6f97";
+                container.appendChild(sep);
+                const link = document.createElement("a");
+                link.href = "#";
+                link.textContent = part;
+                link.addEventListener("click", (e) => { e.preventDefault(); loadDirectory(buildPath); });
+                container.appendChild(link);
+            }
+        }
+        
+        function navigateToRoot(type) {
+            const newRoot = (type === "series") ? SERIES_BASE : MOVIES_BASE;
+            currentRootPath = newRoot;
+            const rootAbsUrl = toAbsoluteUrl(currentRootPath);
+            currentFullUrl = rootAbsUrl;
+            // update active button styling
+            document.querySelectorAll(".root-btn").forEach(btn => {
+                const btnType = btn.getAttribute("data-root");
+                if ((type === "series" && btnType === "series") || (type === "movies" && btnType === "movies")) {
+                    btn.classList.add("active");
+                } else {
+                    btn.classList.remove("active");
+                }
+            });
+            loadDirectory(rootAbsUrl);
+        }
+        
+        // attach root button handlers explicitly
+        const seriesBtn = document.querySelector("[data-root='series']");
+        const moviesBtn = document.querySelector("[data-root='movies']");
+        if (seriesBtn) seriesBtn.addEventListener("click", () => navigateToRoot("series"));
+        if (moviesBtn) moviesBtn.addEventListener("click", () => navigateToRoot("movies"));
+
+        // --- HISTORY / URL SYNC ---
+        let isPopState = false;
+        let firstLoad = true;
+
+        function setRootButtonsFor(path) {
+            const type = path.startsWith(SERIES_BASE) ? "series" : path.startsWith(MOVIES_BASE) ? "movies" : null;
+            if (!type) return;
+            currentRootPath = type === "series" ? SERIES_BASE : MOVIES_BASE;
+            document.querySelectorAll(".root-btn").forEach(b =>
+                b.classList.toggle("active", b.getAttribute("data-root") === type));
+        }
+
+        window.addEventListener("popstate", (e) => {
+            const path = e.state?.path || new URLSearchParams(window.location.search).get("path");
+            if (!path) return;
+            setRootButtonsFor(path);
+            isPopState = true;
+            loadDirectory(ORIGIN + path);
+        });
+
+        // initial load
+        const initPath = new URLSearchParams(window.location.search).get("path");
+        if (initPath) {
+            setRootButtonsFor(initPath);
+            loadDirectory(ORIGIN + initPath);
+        } else {
+            navigateToRoot("series");
+        }
+    })();
+</script>
+</body>
+</html>
