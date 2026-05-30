@@ -1,0 +1,2 @@
+# One-liner to download to SD card
+wget -O "/media/card/Z_(HTML-Exthdd)/Z_WebsiteBackup/0ld/spendings/spending_exact_$(date +%Y%m%d_%H%M%S).json" "https://alcea-wisteria.de/PHP/xnotes/spending_exact.json"
