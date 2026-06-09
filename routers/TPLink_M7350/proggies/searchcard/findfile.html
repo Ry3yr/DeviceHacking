@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Search</title>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .search-card {
+            background: white;
+            border-radius: 20px;
+            padding: 32px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border: 1px solid #e1e8ed;
+        }
+        h1 {
+            color: #1a1a2e;
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        .sub {
+            color: #657786;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+        .input-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        input {
+            flex: 2;
+            padding: 14px 18px;
+            font-size: 16px;
+            border: 1px solid #ccd6dd;
+            border-radius: 12px;
+            background: white;
+            color: #1a1a2e;
+            outline: none;
+            transition: 0.2s;
+        }
+        input:focus {
+            border-color: #e94560;
+            box-shadow: 0 0 0 2px rgba(233,69,96,0.1);
+        }
+        input::placeholder {
+            color: #8899aa;
+        }
+        select {
+            padding: 14px 18px;
+            font-size: 14px;
+            border: 1px solid #ccd6dd;
+            border-radius: 12px;
+            background: white;
+            color: #1a1a2e;
+            cursor: pointer;
+        }
+        button {
+            padding: 14px 28px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            background: #e94560;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:hover {
+            background: #d43f59;
+        }
+        .results {
+            margin-top: 24px;
+        }
+        .result-item {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            transition: 0.2s;
+            border: 1px solid #e1e8ed;
+        }
+        .result-item:hover {
+            background: #fff;
+            border-color: #ccd6dd;
+        }
+        .path-info {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .folder-link {
+            background: #e8f4f8;
+            color: #1a73e8;
+            padding: 4px 12px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: monospace;
+        }
+        .folder-link:hover {
+            background: #d4eaf1;
+        }
+        .filename {
+            font-family: monospace;
+            font-size: 13px;
+            color: #1a1a2e;
+            word-break: break-all;
+        }
+        .file-link {
+            background: #e94560;
+            color: white;
+            padding: 6px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: 0.2s;
+            white-space: nowrap;
+        }
+        .file-link:hover {
+            background: #d43f59;
+        }
+        .loading {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            color: #657786;
+            border: 1px solid #e1e8ed;
+        }
+        .error {
+            border-left: 4px solid #e94560;
+            background: #fff5f5;
+        }
+        .count {
+            color: #657786;
+            margin-bottom: 16px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="search-card">
+        <h1>🔍 Search Files</h1>
+        <div class="sub">Search /media/card</div>
+        
+        <div class="input-group">
+            <input type="text" id="term" placeholder="Enter search term... e.g., p40" autofocus>
+            <select id="timeout">
+                <option value="3">3 sec</option>
+                <option value="5">5 sec</option>
+                <option value="10" selected>10 sec</option>
+                <option value="20">20 sec</option>
+                <option value="30">30 sec</option>
+                <option value="60">60 sec</option>
+                <option value="300">300 sec (5 min)</option>
+                <option value="600">600 sec (10 min)</option>
+            </select>
+            <button onclick="search()">Search →</button>
+        </div>
+        
+        <div id="results"></div>
+    </div>
+</div>
+
+<script>
+    async function search() {
+        const term = document.getElementById('term').value.trim();
+        const timeout = document.getElementById('timeout').value;
+        if (!term) return;
+        
+        const resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = '<div class="loading">⏳ Searching...</div>';
+        
+        try {
+            const url = `/card/ext/cgi-bin/exec.sh?script=sh/searchcard/search.sh&term=${encodeURIComponent(term)}&timeout=${timeout}`;
+            const response = await fetch(url);
+            const text = await response.text();
+            
+            const lines = text.split('\n');
+            const paths = lines.filter(line => 
+                line.trim() && 
+                !line.includes('===') && 
+                !line.includes('Location:') && 
+                !line.includes('Directory:') && 
+                !line.includes('Exit code:') && 
+                !line.includes('Current dir:') &&
+                !line.includes('Content-type:') &&
+                !line.includes('----------------------------------------')
+            );
+            
+            if (paths.length === 0) {
+                resultsDiv.innerHTML = `<div class="result-item error">❌ No results for "${term}"</div>`;
+            } else {
+                let html = `<div class="count">✨ ${paths.length} result${paths.length > 1 ? 's' : ''}</div>`;
+                for (let path of paths) {
+                    const cleanPath = path.trim();
+                    const urlPath = '/card' + cleanPath.replace('/media/card', '');
+                    
+                    // Extract folder path (everything up to last slash)
+                    const lastSlash = cleanPath.lastIndexOf('/');
+                    const folderPath = lastSlash > 0 ? cleanPath.substring(0, lastSlash) : cleanPath;
+                    const fileName = lastSlash > 0 ? cleanPath.substring(lastSlash + 1) : cleanPath;
+                    const folderUrl = '/card' + folderPath.replace('/media/card', '');
+                    
+                    html += `
+                        <div class="result-item">
+                            <div class="path-info">
+                                <span class="filename">📄 ${fileName}</span>
+                                <a href="${folderUrl}" target="_blank" class="folder-link">📁 ${folderPath}</a>
+                            </div>
+                            <a href="${urlPath}" target="_blank" class="file-link">Open →</a>
+                        </div>
+                    `;
+                }
+                resultsDiv.innerHTML = html;
+            }
+        } catch (err) {
+            resultsDiv.innerHTML = `<div class="result-item error">❌ Error: ${err.message}</div>`;
+        }
+    }
+    
+    document.getElementById('term').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') search();
+    });
+</script>
+</body>
+</html>
