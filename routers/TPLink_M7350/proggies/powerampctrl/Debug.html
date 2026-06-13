@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Poweramp Debug</title>
+</head>
+<body>
+    <h1>Poweramp Debug</h1>
+    
+    <textarea id="cmd" rows="3" cols="80">su -c "dumpsys media_session | grep description="</textarea>
+    <br><br>
+    <button onclick="send()">Send</button>
+    
+    <h2>Output:</h2>
+    <pre id="output" style="background:#f0f0f0; padding:10px; overflow:auto;">Ready...</pre>
+
+    <script>
+        const baseUrl = '/card/ext/cgi-bin/exec.sh?script=sh/powerampctrl/powerampctrl.sh&cmd=';
+        
+        async function send() {
+            const cmd = document.getElementById('cmd').value;
+            const output = document.getElementById('output');
+            output.textContent = 'Sending...';
+            
+            try {
+                const url = baseUrl + encodeURIComponent(cmd);
+                const response = await fetch(url);
+                const text = await response.text();
+                output.textContent = text;
+            } catch (err) {
+                output.textContent = 'Error: ' + err.message;
+            }
+        }
+    </script>
+</body>
+</html>
