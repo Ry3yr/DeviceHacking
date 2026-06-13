@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Now Playing</title>
+</head>
+<body style="background:#000; color:#0f0; font-family:monospace; margin:0; padding:8px;">
+    <div id="song" style="font-size:12px;"></div>
+    
+    <script>
+        const baseUrl = '/card/ext/cgi-bin/exec.sh?script=sh/powerampctrl/powerampctrl.sh&cmd=';
+        let lastSong = null;
+        let isFirstRun = true;
+        
+        async function getSong() {
+            const cmd = `su -c "dumpsys media_session | grep description="`;
+            const url = baseUrl + encodeURIComponent(cmd);
+            const response = await fetch(url);
+            const text = await response.text();
+            
+            const lines = text.split('\n');
+            for (let line of lines) {
+                if (line.includes('metadata:') && line.includes('description=')) {
+                    const match = line.match(/description=([^,]+),/);
+                    if (match) {
+                        const newSong = match[1].trim();
+                        // Only update if it's a different song
+                        if (newSong !== lastSong) {
+                            lastSong = newSong;
+                            document.getElementById('song').innerHTML = lastSong;
+                        }
+                        return;
+                    }
+                }
+            }
+            
+            // Keep lastSong unchanged, don't blank it out
+            if (lastSong !== null && !isFirstRun) {
+                document.getElementById('song').innerHTML = lastSong;
+            }
+        }
+        
+        // Initial fetch
+        getSong();
+        isFirstRun = false;
+        
+        // Refresh every 2 seconds, but always keep last known song
+        setInterval(getSong, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Winamp Poweramp Remote</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000000;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+        }
+        
+        .winamp {
+            background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1f 100%);
+            border: 3px solid #3a6ea5;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 0 0 2px #0a0a0a, 0 10px 30px rgba(0,0,0,0.8);
+            width: 500px;
+        }
+        
+        .title-bar {
+            background: linear-gradient(90deg, #1a3a5c 0%, #0d1f33 100%);
+            padding: 8px 12px;
+            margin: -20px -20px 15px -20px;
+            border-radius: 13px 13px 0 0;
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 2px solid #3a6ea5;
+        }
+        
+        .title-text {
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 14px;
+            text-shadow: 0 0 3px #3a6ea5;
+        }
+        
+        .vis {
+            height: 30px;
+            background: repeating-linear-gradient(90deg, #0f0 0px, #0f0 2px, #000 2px, #000 4px);
+            margin-bottom: 20px;
+            animation: pulse 0.5s ease infinite alternate;
+        }
+        
+        @keyframes pulse {
+            from { opacity: 0.7; }
+            to { opacity: 1; }
+        }
+        
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+            justify-content: center;
+        }
+        
+        .winamp-btn {
+            background: linear-gradient(180deg, #3c3c44 0%, #1a1a22 100%);
+            border: 1px solid #3a6ea5;
+            border-radius: 6px;
+            color: #eee;
+            font-family: 'Arial', sans-serif;
+            font-size: 13px;
+            font-weight: bold;
+            padding: 12px 20px;
+            cursor: pointer;
+            min-width: 85px;
+            text-align: center;
+        }
+        
+        .winamp-btn:active {
+            transform: translateY(1px);
+        }
+        
+        .winamp-btn.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-play { background: linear-gradient(180deg, #2a6a2a 0%, #1a4a1a 100%); color: #0f0; }
+        .btn-vol { background: linear-gradient(180deg, #6a6a2a 0%, #4a4a1a 100%); color: #ff0; }
+        .btn-nav { background: linear-gradient(180deg, #3a3a6a 0%, #1a1a4a 100%); color: #88f; }
+        
+        .eq {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+            margin: 15px 0;
+            height: 40px;
+            align-items: flex-end;
+        }
+        
+        .eq-bar {
+            width: 8px;
+            background: #0f0;
+            animation: bounce 0.8s ease infinite alternate;
+        }
+        
+        .eq-bar:nth-child(1) { height: 15px; animation-delay: 0s; }
+        .eq-bar:nth-child(2) { height: 25px; animation-delay: 0.1s; }
+        .eq-bar:nth-child(3) { height: 35px; animation-delay: 0.2s; }
+        .eq-bar:nth-child(4) { height: 20px; animation-delay: 0.3s; }
+        .eq-bar:nth-child(5) { height: 30px; animation-delay: 0.4s; }
+        .eq-bar:nth-child(6) { height: 15px; animation-delay: 0.5s; }
+        .eq-bar:nth-child(7) { height: 28px; animation-delay: 0.6s; }
+        .eq-bar:nth-child(8) { height: 22px; animation-delay: 0.7s; }
+        
+        @keyframes bounce {
+            0% { height: 5px; opacity: 0.5; }
+            100% { height: 40px; opacity: 1; }
+        }
+        
+        .song-frame {
+            background: #000;
+            border: 2px inset #3a6ea5;
+            border-radius: 6px;
+            margin-top: 15px;
+            width: 100%;
+            height: 60px;
+        }
+        
+        .song-frame iframe {
+            width: 100%;
+            height: 60px;
+            border: none;
+            background: #000;
+        }
+        
+        .status-window {
+            background: #000;
+            border: 2px inset #3a6ea5;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 15px;
+            height: 100px;
+            overflow: auto;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            white-space: pre-wrap;
+        }
+        
+        .target-text {
+            font-size: 9px;
+            color: #3a6ea5;
+            text-align: center;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #2a2a2a;
+        }
+        
+        .instruction {
+            background: #0a1a2a;
+            border: 1px solid #3a6ea5;
+            border-radius: 4px;
+            padding: 6px;
+            margin-top: 8px;
+            font-family: monospace;
+            font-size: 9px;
+            color: #0f0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="winamp">
+    <div class="title-bar">
+        <div class="title-text">🔊 WINAMP - POWERAMP REMOTE</div>
+        <div class="title-buttons">─ □ ✕</div>
+    </div>
+    
+    <div class="vis"></div>
+    
+    <div class="btn-row">
+        <button class="winamp-btn btn-nav" id="btnPrev" onclick="sendCmd(5)">⏮ PREV</button>
+        <button class="winamp-btn btn-play" id="btnPlay" onclick="sendCmd(1)">⏯ PLAY/PAUSE</button>
+        <button class="winamp-btn btn-nav" id="btnNext" onclick="sendCmd(4)">⏭ NEXT</button>
+    </div>
+    
+    <div class="btn-row">
+        <button class="winamp-btn btn-nav" id="btnPrevAlbum" onclick="sendCmd(6)">⬅ PREV ALBUM</button>
+        <button class="winamp-btn btn-nav" id="btnNextAlbum" onclick="sendCmd(7)">➡ NEXT ALBUM</button>
+    </div>
+    
+    <div class="btn-row">
+        <button class="winamp-btn btn-vol" id="btnVolUp" onclick="volumeUp()">🔊 VOL +</button>
+        <button class="winamp-btn btn-vol" id="btnVolDown" onclick="volumeDown()">🔉 VOL -</button>
+    </div>
+    
+    <div class="eq">
+        <div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div>
+        <div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div>
+        <div class="eq-bar"></div><div class="eq-bar"></div>
+    </div>
+    
+    <div class="song-frame">
+        <iframe id="songIframe" src="songinfo.html"></iframe>
+    </div>
+    
+    <div class="status-window" id="output">Ready...</div>
+    
+    <div class="target-text">
+        🔌 NC: 192.168.0.190:8023 | 1=Play 4=Next 5=Prev 6=PrevAlbum 7=NextAlbum
+    </div>
+    
+    <div class="instruction">
+        💡 Termux: <strong>busybox telnetd -p 8023</strong>
+    </div>
+</div>
+
+<script>
+    const baseUrl = '/card/ext/cgi-bin/exec.sh?script=sh/powerampctrl/powerampctrl.sh&cmd=';
+    let isRunning = false;
+    let queue = [];
+    
+    function refreshSongInfo() {
+        const iframe = document.getElementById('songIframe');
+        const timestamp = Date.now();
+        iframe.src = `songinfo.html?t=${timestamp}`;
+    }
+    
+    async function processQueue() {
+        if (isRunning) return;
+        if (queue.length === 0) return;
+        
+        isRunning = true;
+        const { cmd, label } = queue.shift();
+        
+        const output = document.getElementById('output');
+        output.textContent = `▶ Sending: ${label}\n`;
+        
+        try {
+            const url = baseUrl + encodeURIComponent(cmd);
+            const response = await fetch(url);
+            const text = await response.text();
+            output.textContent = text;
+            
+            // Refresh song info after command
+            setTimeout(() => refreshSongInfo(), 1500);
+        } catch (err) {
+            output.textContent = `❌ Error: ${err.message}`;
+        }
+        
+        isRunning = false;
+        
+        // Process next in queue after a short delay
+        setTimeout(() => processQueue(), 200);
+    }
+    
+    async function queueCommand(cmd, label) {
+        queue.push({ cmd, label });
+        processQueue();
+    }
+    
+    async function sendCmd(cmdNum) {
+        const cmd = `am broadcast 'intent:#Intent;action=com.maxmpz.audioplayer.API_COMMAND;package=com.maxmpz.audioplayer;i.cmd=${cmdNum};end'`;
+        const labels = {1:'PLAY/PAUSE',4:'NEXT',5:'PREV',6:'PREV ALBUM',7:'NEXT ALBUM'};
+        
+        const output = document.getElementById('output');
+        output.textContent = `⏳ Queued: ${labels[cmdNum]}\n\n${output.textContent}`;
+        
+        await queueCommand(cmd, labels[cmdNum]);
+    }
+    
+    async function volumeUp() {
+        const output = document.getElementById('output');
+        output.textContent = `⏳ Queued: VOL +\n\n${output.textContent}`;
+        await queueCommand('cmd media_session volume --show --stream 3 --adj raise', 'VOL +');
+    }
+    
+    async function volumeDown() {
+        const output = document.getElementById('output');
+        output.textContent = `⏳ Queued: VOL -\n\n${output.textContent}`;
+        await queueCommand('cmd media_session volume --show --stream 3 --adj lower', 'VOL -');
+    }
+    
+    // Initial refresh
+    setTimeout(() => refreshSongInfo(), 500);
+</script>
+</body>
+</html>
