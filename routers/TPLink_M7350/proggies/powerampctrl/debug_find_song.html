@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Now Playing</title>
+    <style>
+        body {
+            font-family: monospace;
+            margin: 20px;
+        }
+        #path {
+            font-size: 14px;
+            word-break: break-all;
+        }
+        details {
+            margin-top: 20px;
+            opacity: 0.6;
+        }
+        summary {
+            cursor: pointer;
+        }
+        pre {
+            font-size: 10px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="path">Loading...</div>
+    
+    <details>
+        <summary>debug</summary>
+        <pre id="debug"></pre>
+    </details>
+
+    <script>
+        const baseUrl = '/card/ext/cgi-bin/exec.sh?script=sh/powerampctrl/powerampctrl.sh&cmd=';
+        
+        // Get filter from URL query string, default to /mobile/
+        const urlParams = new URLSearchParams(window.location.search);
+        const FILTER = urlParams.get('filter') || '/mobile/';
+        
+        async function getSong() {
+            const pathDiv = document.getElementById('path');
+            const debugDiv = document.getElementById('debug');
+            
+            const cmd = `su -c "ls -la /proc/20392/fd/ 2>/dev/null | grep '${FILTER}' | sed 's/.*-> //' | tail -1"`;
+            
+            try {
+                const url = baseUrl + encodeURIComponent(cmd);
+                const response = await fetch(url);
+                const text = await response.text();
+                
+                debugDiv.textContent = text;
+                
+                const match = text.match(/^\/storage\/[^\n]+/m);
+                if (match) {
+                    pathDiv.textContent = match[0];
+                } else {
+                    pathDiv.textContent = `No song matching filter "${FILTER}"`;
+                }
+            } catch (err) {
+                pathDiv.textContent = 'Error';
+                debugDiv.textContent = err.message;
+            }
+        }
+        
+        getSong();
+        setInterval(getSong, 3000);
+    </script>
+</body>
+</html>
