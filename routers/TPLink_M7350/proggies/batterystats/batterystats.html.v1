@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Battery Stats</title>
+    <script src="chart.umd.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 15px; margin: 0; }
+        h1 { color: #58a6ff; margin: 0 0 10px; font-size: 20px; }
+        button { background: #238636; color: white; border: none; padding: 5px 12px; margin: 2px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        button:hover { background: #2ea043; }
+        button.active { background: #1f6feb; }
+        #cmd { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 5px; width: 50%; font-family: monospace; font-size: 12px; }
+        .status { color: #8b949e; font-size: 11px; margin: 5px 0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+        .panel { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px; }
+        .panel h3 { margin: 0 0 8px; color: #58a6ff; font-size: 12px; }
+        .panel.full { grid-column: 1 / -1; }
+        .raw { background: #0d1117; padding: 8px; font-family: monospace; font-size: 10px; white-space: pre-wrap; overflow: auto; max-height: 200px; color: #6e7681; border-radius: 4px; }
+        .row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #21262d; font-size: 11px; }
+        .app { display: flex; gap: 6px; padding: 4px; margin: 2px 0; background: #0d1117; border-radius: 3px; font-size: 11px; align-items: center; }
+        .rank { min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; background: #238636; color: white; border-radius: 50%; font-size: 9px; }
+        .rank.high { background: #da3633; }
+        .bar { flex: 1; height: 4px; background: #21262d; border-radius: 2px; }
+        .bar-fill { height: 100%; background: #58a6ff; border-radius: 2px; }
+        .bar-fill.high { background: #da3633; }
+        canvas { max-height: 200px; }
+    </style>
+</head>
+<body>
+    <h1>🔋 Battery Stats</h1>
+    <div>
+        <button onclick="run('summary')" id="btn-summary">Summary</button>
+        <button onclick="run('history')" id="btn-history">History</button>
+        <button onclick="run('apps')" id="btn-apps">Top Apps</button>
+        <button onclick="run('drain')" id="btn-drain">Drain</button>
+        <button onclick="run('full')" id="btn-full">Full</button>
+        <button onclick="run('wake')" id="btn-wake">Wake Locks</button>
+        <button onclick="runCustom()" id="btn-custom">Custom</button>
+        <input id="cmd" value="adb shell dumpsys batterystats --history | head -n 200" />
+    </div>
+    <div class="status" id="status">Ready</div>
+    
+    <div class="grid">
+        <div class="panel">
+            <h3>📊 Overview</h3>
+            <div id="overview">...</div>
+        </div>
+        <div class="panel">
+            <h3>⚡ Top Apps</h3>
+            <div id="top-apps">...</div>
+        </div>
+        <div class="panel">
+            <h3>📈 Distribution</h3>
+            <canvas id="chart-pie"></canvas>
+        </div>
+        <div class="panel">
+            <h3>⏱️ Timeline</h3>
+            <canvas id="chart-bar"></canvas>
+        </div>
+        <div class="panel full">
+            <h3>📝 Raw (debug)</h3>
+            <div class="raw" id="raw">...</div>
+        </div>
+    </div>
+
+    <script>
+        const baseUrl = '/card/ext/cgi-bin/exec.sh?script=sh/batterystats/batterystats.sh&cmd=';
+        let pieChart = null, barChart = null;
+        
+        const presets = {
+            summary: 'adb shell dumpsys batterystats --history | head -n 50',
+            history: 'adb shell dumpsys batterystats --history | head -n 200',
+            apps: 'adb shell dumpsys batterystats --history | head -n 300',
+            drain: 'adb shell dumpsys batterystats --checkin | head -n 5000',
+            full: 'adb shell dumpsys batterystats',
+            wake: 'adb shell dumpsys batterystats | grep -i "wake_lock" | head -n 50'
+        };
+        
+        function stripAnsi(str) {
+            return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+        }
+        
+        function parse(text) {
+            const lines = text.split('\n');
+            const overview = {};
+            const apps = [];
+            const history = [];
+            
+            for (const line of lines) {
+                const l = line.trim();
+                if (!l || l.startsWith('=== ') || l.includes('Exit code:') || l.includes('Current dir:')) continue;
+                
+                if (l.includes('status=') && l.includes('volt=')) {
+                    const m = l.match(/status=(\w+)/); if (m) overview.status = m[1];
+                    const h = l.match(/health=(\w+)/); if (h) overview.health = h[1];
+                    const t = l.match(/temp=(\d+)/); if (t) overview.temp = (parseInt(t[1])/10).toFixed(1) + '°C';
+                    const v = l.match(/volt=(\d+)/); if (v) overview.voltage = v[1] + 'mV';
+                    const c = l.match(/current=(-?\d+)/); if (c) overview.current = c[1] + 'mA';
+                    const p = l.match(/plug=(\w+)/); if (p) overview.plug = p[1];
+                }
+                
+                if (l.includes('RESET:TIME:')) {
+                    const m = l.match(/RESET:TIME:\s*(\S+)/);
+                    if (m) overview.since = m[1];
+                }
+                
+                const appMatch = l.match(/(?:fg|top|job)=u0a\d+:"([^"]+)"/);
+                if (appMatch) {
+                    let name = appMatch[1].split('/')[0];
+                    const found = apps.find(a => a.name === name);
+                    if (found) found.count++;
+                    else apps.push({ name, count: 1 });
+                }
+                
+                const timeMatch = l.match(/^(\+?\d+s?\d*ms?)\s+\(\d+\)\s+\d+\s+(.+)/);
+                if (timeMatch) {
+                    history.push({ time: timeMatch[1], event: timeMatch[2].substring(0, 40) });
+                }
+            }
+            
+            apps.sort((a, b) => b.count - a.count);
+            const max = Math.max(...apps.map(a => a.count), 1);
+            apps.forEach((a, i) => {
+                a.percent = Math.round((a.count / max) * 100);
+                a.rank = i + 1;
+            });
+            
+            return { overview, apps: apps.slice(0, 10), history: history.slice(0, 15) };
+        }
+        
+        // Parse --checkin format for Drain tab
+        // Format confirmed from real output:
+        //   9,0,i,uid,<uid>,<pkg>         — uid mapping
+        //   9,0,i,bat,<lvl>,<status>,...  — battery overview
+        //   9,0,i,dsd,<ms>,<lvl>,...      — discharge step (per battery %)
+        //   9,<uid>,l,cpu,<user_ms>,<sys_ms>,... — per-uid CPU (only after head limit allows)
+        //   9,<uid>,l,wl,<name>,<ms>,...  — per-uid wake lock
+        //   9,<uid>,l,nt,<rx>,<pkts>,<tx>,... — per-uid network
+        function parseDrain(text) {
+            const lines = text.split('\n');
+            const uidMap = {};
+            const drain = {};
+            const overview = {};
+            const dsdSteps = []; // discharge steps for timeline
+
+            for (const line of lines) {
+                const l = line.trim();
+                if (!l || !l.match(/^9,/)) continue;
+
+                const parts = l.split(',');
+                if (parts.length < 4) continue;
+
+                const second = parts[1].trim();
+                const type   = parts[2].trim();
+                const cat    = parts[3].trim();
+
+                // UID mapping: 9,0,i,uid,<uid>,<pkg>
+                if (type === 'i' && cat === 'uid' && parts.length >= 6) {
+                    uidMap[parts[4].trim()] = parts[5].trim();
+                    continue;
+                }
+
+                // Battery overview: 9,0,i,bat,<level>,<status>,<health>,<plug>,<temp>,<volt>
+                if (type === 'i' && cat === 'bat' && parts.length >= 8) {
+                    overview.level   = parts[4].trim() + '%';
+                    overview.status  = parts[5].trim();
+                    overview.health  = parts[6].trim();
+                    overview.plug    = parts[7].trim();
+                    if (parts[8]) overview.temp    = (parseInt(parts[8]) / 10).toFixed(1) + '°C';
+                    if (parts[9]) overview.voltage = parts[9].trim() + 'mV';
+                    continue;
+                }
+
+                // Discharge step: 9,0,i,dsd,<duration_ms>,<level>,...
+                // Use these to build a discharge timeline when per-uid data is absent
+                if (type === 'i' && cat === 'dsd' && parts.length >= 6) {
+                    const ms  = parseInt(parts[4]) || 0;
+                    const lvl = parseInt(parts[5]) || 0;
+                    dsdSteps.push({ level: lvl, ms });
+                    continue;
+                }
+
+                // Per-UID stats: 9,<uid>,l,<category>,...
+                if (type === 'l' && parts.length > 4) {
+                    const pkg = uidMap[second] || ('uid:' + second);
+                    if (!drain[pkg]) drain[pkg] = { name: pkg, cpu: 0, wake: 0, net: 0, total: 0 };
+
+                    if (cat === 'cpu' && parts.length >= 6) {
+                        const user = parseInt(parts[4]) || 0;
+                        const sys  = parseInt(parts[5]) || 0;
+                        drain[pkg].cpu   += user + sys;
+                        drain[pkg].total += user + sys;
+                    } else if (cat === 'wl' && parts.length >= 6) {
+                        // wl lines: name,full_time,full_count,partial_time,...
+                        // partial wake (index 7) is most relevant for drain
+                        const partial = parseInt(parts[7]) || parseInt(parts[5]) || 0;
+                        drain[pkg].wake  += partial;
+                        drain[pkg].total += partial;
+                    } else if (cat === 'nt' && parts.length >= 7) {
+                        const rx = parseInt(parts[4]) || 0;
+                        const tx = parseInt(parts[6]) || 0;
+                        drain[pkg].net   += rx + tx;
+                        drain[pkg].total += Math.round((rx + tx) / 1024);
+                    } else {
+                        // generic fallback
+                        for (let i = 4; i < Math.min(parts.length, 8); i++) {
+                            const val = parseInt(parts[i]);
+                            if (!isNaN(val) && val > 0) drain[pkg].total += val;
+                        }
+                    }
+                }
+            }
+
+            let apps = Object.values(drain).filter(a => a.total > 0)
+                             .sort((a, b) => b.total - a.total).slice(0, 10);
+
+            // If no per-uid l-lines parsed yet (head limit too low), synthesise
+            // app-like entries from discharge steps grouped by battery level
+            let history = [];
+            if (apps.length === 0 && dsdSteps.length > 0) {
+                // Show discharge steps as a timeline instead
+                history = dsdSteps.slice(0, 30).map(s => ({
+                    time: s.level + '%',
+                    event: Math.round(s.ms / 1000) + 's'
+                }));
+                // Build pseudo-apps from the longest discharge steps
+                const slowest = [...dsdSteps].sort((a, b) => b.ms - a.ms).slice(0, 10);
+                apps = slowest.map((s, i) => ({
+                    name: `Level ${s.level}%`,
+                    cpu: 0, wake: 0, net: 0,
+                    total: s.ms,
+                    label: Math.round(s.ms / 1000) + 's drain'
+                }));
+                overview.note = 'Per-app data not yet loaded — showing discharge steps. Try Full tab or increase head limit.';
+            }
+
+            const max = Math.max(...apps.map(a => a.total), 1);
+            apps.forEach((a, i) => {
+                a.percent = Math.round((a.total / max) * 100);
+                a.rank = i + 1;
+                if (!a.label) {
+                    a.label = (a.cpu   ? `CPU:${Math.round(a.cpu/1000)}s `   : '') +
+                              (a.wake  ? `Wake:${Math.round(a.wake/1000)}s ` : '') +
+                              (a.net   ? `Net:${Math.round(a.net/1024)}KB`   : '') ||
+                              String(a.total);
+                }
+            });
+
+            return { overview, apps, history };
+        }
+        
+        function render(data, mode) {
+            const o = data.overview;
+            document.getElementById('overview').innerHTML = [
+                ['Status', o.status || '-'], ['Health', o.health || '-'], ['Temp', o.temp || '-'],
+                ['Voltage', o.voltage || '-'], ['Current', o.current || '-'], ['Plug', o.plug || '-'],
+                ['Level', o.level || '-'], ['Since', o.since || '-'], ['Top App', data.apps[0]?.name || '-']
+            ].map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join('') +
+            (o.note ? `<div style="color:#d29922;font-size:10px;margin-top:6px;line-height:1.4">${o.note}</div>` : '');
+            
+            const appsDiv = document.getElementById('top-apps');
+            if (!data.apps.length) {
+                appsDiv.innerHTML = '<div style="color:#6e7681;font-size:11px">No app data found</div>';
+            } else {
+                appsDiv.innerHTML = data.apps.map(a => {
+                    const rc = a.rank <= 2 ? 'high' : '';
+                    const bc = a.rank <= 2 ? 'high' : '';
+                    const label = mode === 'drain' ? (a.label || a.total) : a.count;
+                    return `<div class="app">
+                        <div class="rank ${rc}">${a.rank}</div>
+                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
+                        <div class="bar"><div class="bar-fill ${bc}" style="width:${a.percent}%"></div></div>
+                        <span>${label}</span>
+                    </div>`;
+                }).join('');
+            }
+            
+            const ctxPie = document.getElementById('chart-pie').getContext('2d');
+            const ctxBar = document.getElementById('chart-bar').getContext('2d');
+            if (pieChart) pieChart.destroy();
+            if (barChart) barChart.destroy();
+            
+            if (data.apps.length) {
+                const colors = ['#da3633','#d29922','#58a6ff','#238636','#8957e5','#1f6feb','#f0883e','#3fb950','#a371f7','#56d364'];
+                const labels = data.apps.map(a => a.name.split('.').pop().substring(0, 10));
+                const values = mode === 'drain' ? data.apps.map(a => a.total) : data.apps.map(a => a.count);
+                
+                pieChart = new Chart(ctxPie, {
+                    type: 'doughnut',
+                    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#8b949e', font: { size: 9 }, boxWidth: 8 } } } }
+                });
+                
+                if (data.history.length) {
+                    barChart = new Chart(ctxBar, {
+                        type: 'bar',
+                        data: { labels: data.history.map(h => h.time), datasets: [{ data: data.history.map(() => 1), backgroundColor: '#58a6ff', borderRadius: 2 }] },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#8b949e', font: { size: 8 } }, grid: { color: '#21262d' } }, y: { display: false } }, plugins: { legend: { display: false } } }
+                    });
+                } else {
+                    // Drain mode: bar chart of top apps
+                    barChart = new Chart(ctxBar, {
+                        type: 'bar',
+                        data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 2 }] },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#8b949e', font: { size: 8 } }, grid: { color: '#21262d' } }, y: { display: false } }, plugins: { legend: { display: false } } }
+                    });
+                }
+            }
+        }
+        
+        async function run(type) {
+            document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + type).classList.add('active');
+            const cmd = presets[type];
+            document.getElementById('cmd').value = cmd;
+            await fetchData(cmd, type);
+        }
+        
+        async function runCustom() {
+            document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-custom').classList.add('active');
+            await fetchData(document.getElementById('cmd').value, 'custom');
+        }
+        
+        async function fetchData(cmd, type) {
+            const raw = document.getElementById('raw');
+            const status = document.getElementById('status');
+            raw.textContent = 'Fetching...';
+            status.textContent = 'Running...';
+            
+            try {
+                const url = baseUrl + encodeURIComponent(cmd);
+                const response = await fetch(url);
+                const text = await response.text();
+                const clean = stripAnsi(text);
+                
+                raw.textContent = clean;
+                status.textContent = 'Updated: ' + new Date().toLocaleString();
+                
+                // Use parseDrain for drain tab, original parse for everything else
+                let parsed;
+                if (type === 'drain') {
+                    parsed = parseDrain(clean);
+                } else {
+                    parsed = parse(clean);
+                }
+                render(parsed, type);
+                
+            } catch (err) {
+                raw.textContent = 'Error: ' + err.message;
+                status.textContent = 'Failed';
+            }
+        }
+    </script>
+</body>
+</html>

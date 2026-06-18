@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Battery Stats</title>
+    <script src="chart.umd.min.js"></script>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 15px; margin: 0; }
+        h1 { color: #58a6ff; margin: 0 0 10px; font-size: 20px; }
+        button { background: #238636; color: white; border: none; padding: 5px 12px; margin: 2px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        button:hover { background: #2ea043; }
+        button.active { background: #1f6feb; }
+        #cmd { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 5px; width: 50%; font-family: monospace; font-size: 12px; }
+        .status { color: #8b949e; font-size: 11px; margin: 5px 0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+        .panel { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px; }
+        .panel h3 { margin: 0 0 8px; color: #58a6ff; font-size: 12px; }
+        .panel.full { grid-column: 1 / -1; }
+        .raw { background: #0d1117; padding: 8px; font-family: monospace; font-size: 10px; white-space: pre-wrap; overflow: auto; max-height: 200px; color: #6e7681; border-radius: 4px; }
+        .row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #21262d; font-size: 11px; }
+        .app { display: flex; gap: 6px; padding: 4px; margin: 2px 0; background: #0d1117; border-radius: 3px; font-size: 11px; align-items: center; }
+        .rank { min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; background: #238636; color: white; border-radius: 50%; font-size: 9px; }
+        .rank.high { background: #da3633; }
+        .bar { flex: 1; height: 4px; background: #21262d; border-radius: 2px; }
+        .bar-fill { height: 100%; background: #58a6ff; border-radius: 2px; }
+        .bar-fill.high { background: #da3633; }
+        canvas { max-height: 200px; }
+    </style>
+</head>
+<body>
+    <h1>🔋 Battery Stats</h1>
+    <div>
+        <button onclick="run('summary')" id="btn-summary">Summary</button>
+        <button onclick="run('history')" id="btn-history">History</button>
+        <button onclick="run('apps')" id="btn-apps">Top Apps</button>
+        <button onclick="run('drain')" id="btn-drain">Drain</button>
+        <button onclick="run('full')" id="btn-full">Full</button>
+        <button onclick="run('wake')" id="btn-wake">Wake Locks</button>
+        <button onclick="runCustom()" id="btn-custom">Custom</button>
+        <input id="cmd" value="adb shell dumpsys batterystats --history | head -n 200" />
+    </div>
+    <div class="status" id="status">Ready</div>
+    
+    <div class="grid">
+        <div class="panel">
+            <h3>📊 Overview</h3>
+            <div id="overview">...</div>
+        </div>
+        <div class="panel">
+            <h3>⚡ Top Apps</h3>
+            <div id="top-apps">...</div>
+        </div>
+        <div class="panel">
+            <h3>📈 Distribution</h3>
+            <canvas id="chart-pie"></canvas>
+        </div>
+        <div class="panel">
+            <h3>⏱️ Timeline</h3>
+            <canvas id="chart-bar"></canvas>
+        </div>
+        <div class="panel full">
+            <h3>📝 Raw (debug)</h3>
+            <div class="raw" id="raw">...</div>
+        </div>
+    </div>
+
+    <script>
+        const baseUrl = '/card/ext/cgi-bin/exec.sh?script=sh/batterystats/batterystats.sh&cmd=';
+        let pieChart = null, barChart = null;
+        
+        const presets = {
+            summary: 'adb shell dumpsys batterystats --history | head -n 50',
+            history: 'adb shell dumpsys batterystats --history | head -n 200',
+            apps: 'adb shell dumpsys batterystats --history | head -n 300',
+            drain: 'adb shell dumpsys batterystats',
+            full: 'adb shell dumpsys batterystats',
+            wake: 'adb shell dumpsys batterystats | grep -i "wake_lock" | head -n 50'
+        };
+        
+        function stripAnsi(str) {
+            return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+        }
+        
+        function parse(text) {
+            const lines = text.split('\n');
+            const overview = {};
+            const apps = [];
+            const history = [];
+            
+            for (const line of lines) {
+                const l = line.trim();
+                if (!l || l.startsWith('=== ') || l.includes('Exit code:') || l.includes('Current dir:')) continue;
+                
+                if (l.includes('status=') && l.includes('volt=')) {
+                    const m = l.match(/status=(\w+)/); if (m) overview.status = m[1];
+                    const h = l.match(/health=(\w+)/); if (h) overview.health = h[1];
+                    const t = l.match(/temp=(\d+)/); if (t) overview.temp = (parseInt(t[1])/10).toFixed(1) + '°C';
+                    const v = l.match(/volt=(\d+)/); if (v) overview.voltage = v[1] + 'mV';
+                    const c = l.match(/current=(-?\d+)/); if (c) overview.current = c[1] + 'mA';
+                    const p = l.match(/plug=(\w+)/); if (p) overview.plug = p[1];
+                }
+                
+                if (l.includes('RESET:TIME:')) {
+                    const m = l.match(/RESET:TIME:\s*(\S+)/);
+                    if (m) overview.since = m[1];
+                }
+                
+                const appMatch = l.match(/(?:fg|top|job)=u0a\d+:"([^"]+)"/);
+                if (appMatch) {
+                    let name = appMatch[1].split('/')[0];
+                    const found = apps.find(a => a.name === name);
+                    if (found) found.count++;
+                    else apps.push({ name, count: 1 });
+                }
+                
+                const timeMatch = l.match(/^(\+?\d+s?\d*ms?)\s+\(\d+\)\s+\d+\s+(.+)/);
+                if (timeMatch) {
+                    history.push({ time: timeMatch[1], event: timeMatch[2].substring(0, 40) });
+                }
+            }
+            
+            apps.sort((a, b) => b.count - a.count);
+            const max = Math.max(...apps.map(a => a.count), 1);
+            apps.forEach((a, i) => {
+                a.percent = Math.round((a.count / max) * 100);
+                a.rank = i + 1;
+            });
+            
+            return { overview, apps: apps.slice(0, 10), history: history.slice(0, 15) };
+        }
+        
+        // Parse "Estimated power use (mAh)" section from regular dumpsys batterystats
+        // Example lines:
+        //   Estimated power use (mAh):
+        //     Capacity: 4000, Computed drain: 312, actual drain: 280-290
+        //     Screen: 120
+        //     Uid 0: 45.2 ( cpu=40 wake=5.2 )
+        //     Uid u0a221: 12.3 ( cpu=10 wake=2.3 )
+        function parseDrain(text) {
+            const lines = text.split('\n');
+            const overview = {};
+            const drain = {};
+            let inSection = false;
+
+            // Build uid map from full batterystats output.
+            // The "Estimated power use" section has lines like:
+            //   Uid u0a399: 12.3 ( cpu=10 wake=2.3 )
+            // The full output also has package-to-uid mappings in the per-uid stats blocks:
+            //   U0 10399:               <- uid block header  
+            //     com.brave.browser     <- package name line
+            // We parse all of these to build the map.
+            const uidMap = {};
+            let lastUid = null;
+            for (let i = 0; i < lines.length; i++) {
+                const l = lines[i].trim();
+                // "  u0a399:" style header
+                const hM = l.match(/^(u\d+a\d+|\d+):$/);
+                if (hM) { lastUid = hM[1]; continue; }
+                // "UID 10399: com.package" or "U0 10399: com.package"
+                const uLineM = l.match(/^U(?:\d+\s+)?(\d+):\s+([a-z][\w.]+\.[\w.]+)/i);
+                if (uLineM) { uidMap[uLineM[1]] = uLineM[2]; lastUid = null; continue; }
+                // Package name following a uid header
+                if (lastUid && /^[a-z][\w.]+\.[a-zA-Z]/.test(l)) {
+                    uidMap[lastUid] = l.split(/\s/)[0];
+                    lastUid = null; continue;
+                }
+                if (lastUid && l) lastUid = null;
+            }
+
+            function resolvePkg(rawUid) {
+                if (uidMap[rawUid]) return uidMap[rawUid];
+                // u0a399 -> numeric app uid = 10000 + 399 = 10399
+                const uM = rawUid.match(/^u(\d+)a(\d+)$/);
+                if (uM) {
+                    const numeric = String(10000 + parseInt(uM[2]));
+                    if (uidMap[numeric]) return uidMap[numeric];
+                }
+                if (rawUid === '0') return 'Kernel/System';
+                return null;
+            }
+
+            const SKIP = new Set(['Timestamp','Capacity','Computed','Duration','Start','End','Statistics','Since','Reset','Date']);
+
+            for (const line of lines) {
+                const l = line.trim();
+
+                if (l.includes('Estimated power use')) { inSection = true; continue; }
+                if (!inSection) continue;
+                if (l.match(/^\w.*statistics/i) && !l.includes('Estimated')) break;
+
+                // Capacity summary: "Capacity: 4000, Computed drain: 312, actual drain: 280-290"
+                const capM = l.match(/Capacity:\s*([\d.]+).*Computed drain:\s*([\d.]+)/);
+                if (capM) {
+                    overview.capacity = capM[1] + ' mAh';
+                    overview.computed = capM[2] + ' mAh';
+                    const actM = l.match(/actual drain:\s*([\S]+)/);
+                    if (actM) overview.actual = actM[1] + ' mAh';
+                    continue;
+                }
+
+                // Per-UID: "Uid u0a399: 12.3 ( cpu=10 wake=2.3 )"
+                const uidM = l.match(/^Uid\s+([^:]+):\s*([\d.]+)\s*(?:\(([^)]*)\))?/i);
+                if (uidM) {
+                    const rawUid = uidM[1].trim();
+                    const mah    = parseFloat(uidM[2]);
+                    if (mah <= 0) continue;
+                    const detail = uidM[3] || '';
+                    const pkg    = resolvePkg(rawUid) || ('uid:' + rawUid);
+                    drain[pkg]   = drain[pkg] || { name: pkg, mah: 0, label: '' };
+                    drain[pkg].mah += mah;
+                    const bp = [];
+                    const cpuM2  = detail.match(/cpu=([\d.]+)/);   if (cpuM2)  bp.push('CPU:'  +cpuM2[1]+'mAh');
+                    const wakeM2 = detail.match(/wake=([\d.]+)/);  if (wakeM2) bp.push('Wake:' +wakeM2[1]+'mAh');
+                    const wifiM2 = detail.match(/wifi=([\d.]+)/);  if (wifiM2) bp.push('WiFi:' +wifiM2[1]+'mAh');
+                    const gpsM2  = detail.match(/gps=([\d.]+)/);   if (gpsM2)  bp.push('GPS:'  +gpsM2[1]+'mAh');
+                    drain[pkg].label = bp.join(' ') || mah.toFixed(1)+' mAh';
+                    continue;
+                }
+
+                // Named component: "Screen: 120.5" / "cpu: 1294" etc. — but not uid lines
+                const compM = l.match(/^([A-Za-z][^:]{0,30}):\s*([\d.]+)/);
+                if (compM) {
+                    const name = compM[1].trim();
+                    const mah  = parseFloat(compM[2]);
+                    if (!SKIP.has(name) && mah > 0) {
+                        drain[name] = drain[name] || { name, mah: 0, label: '' };
+                        drain[name].mah += mah;
+                        drain[name].label = drain[name].mah.toFixed(1) + ' mAh';
+                    }
+                }
+            }
+
+            if (!inSection) {
+                overview.note = '⚠️ "Estimated power use" section not found. Try the Full tab and search for it manually.';
+            }
+
+            const apps = Object.values(drain)
+                .filter(a => a.mah > 0)
+                .sort((a, b) => b.mah - a.mah)
+                .slice(0, 50);
+
+            const max = Math.max(...apps.map(a => a.mah), 1);
+            apps.forEach((a, i) => {
+                a.percent = Math.round((a.mah / max) * 100);
+                a.rank    = i + 1;
+                a.total   = a.mah;
+            });
+
+            return { overview, apps, history: [] };
+        }
+        
+        function render(data, mode) {
+            const o = data.overview;
+            const isDrain = mode === 'drain';
+            document.getElementById('overview').innerHTML = (isDrain ? [
+                ['Capacity',  o.capacity || '-'],
+                ['Computed',  o.computed || '-'],
+                ['Actual',    o.actual   || '-'],
+                ['Top App',   data.apps[0]?.name || '-']
+            ] : [
+                ['Status', o.status || '-'], ['Health', o.health || '-'], ['Temp', o.temp || '-'],
+                ['Voltage', o.voltage || '-'], ['Current', o.current || '-'], ['Plug', o.plug || '-'],
+                ['Level', o.level || '-'], ['Since', o.since || '-'], ['Top App', data.apps[0]?.name || '-']
+            ]).map(([k, v]) => `<div class="row"><span>${k}</span><span>${v}</span></div>`).join('') +
+            (o.note ? `<div style="color:#d29922;font-size:10px;margin-top:6px;line-height:1.4">${o.note}</div>` : '');
+            
+            const appsDiv = document.getElementById('top-apps');
+            if (mode === 'drain') appsDiv.style.maxHeight = '400px', appsDiv.style.overflowY = 'auto';
+            else appsDiv.style.maxHeight = '', appsDiv.style.overflowY = '';
+            if (!data.apps.length) {
+                appsDiv.innerHTML = '<div style="color:#6e7681;font-size:11px">No app data found</div>';
+            } else {
+                appsDiv.innerHTML = data.apps.map(a => {
+                    const rc = a.rank <= 2 ? 'high' : '';
+                    const bc = a.rank <= 2 ? 'high' : '';
+                    const label = mode === 'drain' ? (a.label || a.total) : a.count;
+                    return `<div class="app">
+                        <div class="rank ${rc}">${a.rank}</div>
+                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${a.name}</span>
+                        <div class="bar"><div class="bar-fill ${bc}" style="width:${a.percent}%"></div></div>
+                        <span>${label}</span>
+                    </div>`;
+                }).join('');
+            }
+            
+            const ctxPie = document.getElementById('chart-pie').getContext('2d');
+            const ctxBar = document.getElementById('chart-bar').getContext('2d');
+            if (pieChart) pieChart.destroy();
+            if (barChart) barChart.destroy();
+            
+            if (data.apps.length) {
+                const colors = ['#da3633','#d29922','#58a6ff','#238636','#8957e5','#1f6feb','#f0883e','#3fb950','#a371f7','#56d364'];
+                const labels = data.apps.map(a => a.name.split('.').pop().substring(0, 10));
+                const values = mode === 'drain' ? data.apps.map(a => a.total) : data.apps.map(a => a.count);
+                
+                pieChart = new Chart(ctxPie, {
+                    type: 'doughnut',
+                    data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { color: '#8b949e', font: { size: 9 }, boxWidth: 8 } } } }
+                });
+                
+                if (data.history.length) {
+                    barChart = new Chart(ctxBar, {
+                        type: 'bar',
+                        data: { labels: data.history.map(h => h.time), datasets: [{ data: data.history.map(() => 1), backgroundColor: '#58a6ff', borderRadius: 2 }] },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#8b949e', font: { size: 8 } }, grid: { color: '#21262d' } }, y: { display: false } }, plugins: { legend: { display: false } } }
+                    });
+                } else {
+                    // Drain mode: bar chart of top apps
+                    barChart = new Chart(ctxBar, {
+                        type: 'bar',
+                        data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 2 }] },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#8b949e', font: { size: 8 } }, grid: { color: '#21262d' } }, y: { display: false } }, plugins: { legend: { display: false } } }
+                    });
+                }
+            }
+        }
+        
+        async function run(type) {
+            document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + type).classList.add('active');
+            const cmd = presets[type];
+            document.getElementById('cmd').value = cmd;
+            await fetchData(cmd, type);
+        }
+        
+        async function runCustom() {
+            document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-custom').classList.add('active');
+            await fetchData(document.getElementById('cmd').value, 'custom');
+        }
+        
+        async function fetchData(cmd, type) {
+            const raw = document.getElementById('raw');
+            const status = document.getElementById('status');
+            raw.textContent = 'Fetching...';
+            status.textContent = 'Running...';
+            
+            try {
+                const url = baseUrl + encodeURIComponent(cmd);
+                const response = await fetch(url);
+                const text = await response.text();
+                const clean = stripAnsi(text);
+                
+                raw.textContent = clean;
+                status.textContent = 'Updated: ' + new Date().toLocaleString();
+                
+                // Use parseDrain for drain tab, original parse for everything else
+                let parsed;
+                if (type === 'drain') {
+                    parsed = parseDrain(clean);
+                } else {
+                    parsed = parse(clean);
+                }
+                render(parsed, type);
+                
+            } catch (err) {
+                raw.textContent = 'Error: ' + err.message;
+                status.textContent = 'Failed';
+            }
+        }
+    </script>
+</body>
+</html>
