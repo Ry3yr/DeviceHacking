@@ -6,14 +6,14 @@ from tkinter import ttk, scrolledtext
 import threading
 import subprocess
 import re
+import tempfile
+import os
 
-# Android telnet (direct connection)
 ANDROID_HOST = "192.168.0.190"
 ANDROID_PORT = 8023
-WINDOWS_IP = "192.168.0.163"
+WINDOWS_IP = "192.168.0.122"
 AUDIO_STREAM_PORT = 12345
 
-# ----- Color palette - Light Pink theme -----
 COL_BG = "#fff5f7"
 COL_PANEL = "#ffe4ed"
 COL_PANEL_LIGHT = "#ffd9e4"
@@ -42,8 +42,9 @@ class AudioStreamer:
         self.log_callback = callback
 
     def start_receiver(self, stream_id):
-        """Start TCP server to receive audio stream"""
+        """Receive entire file into memory, save to temp file, then play with ffplay."""
         self.stream_id = stream_id
+        temp_path = None
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -65,77 +66,94 @@ class AudioStreamer:
 
             if self.stop_flag or self.conn is None:
                 print(f"[Audio {stream_id}] Stopped before connection")
-                return False
+                return None
 
-            self.process = subprocess.Popen(
-                ['ffplay', '-i', '-', '-nodisp', '-autoexit', '-loglevel', 'quiet'],
-                stdin=subprocess.PIPE
-            )
-
+            # Receive all data into memory
+            print(f"[Audio {stream_id}] Receiving file...")
+            file_data = bytearray()
             bytes_received = 0
             last_log = time.time()
 
             while not self.stop_flag:
                 try:
-                    data = self.conn.recv(8192)
+                    data = self.conn.recv(65536)
                     if not data:
                         print(f"[Audio {stream_id}] Connection closed by sender")
                         break
-                    if self.process and self.process.stdin:
-                        self.process.stdin.write(data)
-                        bytes_received += len(data)
-                        self.total_bytes = bytes_received
+                    file_data.extend(data)
+                    bytes_received += len(data)
+                    self.total_bytes = bytes_received
 
-                        if time.time() - last_log >= 1:
-                            mb = bytes_received / (1024 * 1024)
-                            if self.log_callback:
-                                self.log_callback(mb, stream_id)
-                            last_log = time.time()
+                    if time.time() - last_log >= 1:
+                        mb = bytes_received / (1024 * 1024)
+                        if self.log_callback:
+                            self.log_callback(mb, stream_id)
+                        last_log = time.time()
                 except socket.timeout:
                     continue
-                except BrokenPipeError:
-                    print(f"[Audio {stream_id}] Broken pipe")
-                    break
                 except Exception as e:
                     if not self.stop_flag:
                         print(f"[Audio {stream_id}] Receive error: {e}")
                     break
 
-            print(f"[Audio {stream_id}] Stream finished, received {bytes_received/(1024*1024):.2f} MB")
-            return True
+            print(f"[Audio {stream_id}] Received {bytes_received/(1024*1024):.2f} MB")
+
+            if self.stop_flag or bytes_received == 0:
+                print(f"[Audio {stream_id}] Stopped or no data")
+                return None
+
+            # Save to temp file
+            suffix = ".mp3"
+            fd, temp_path = tempfile.mkstemp(suffix=suffix)
+            try:
+                os.write(fd, file_data)
+            finally:
+                os.close(fd)
+
+            print(f"[Audio {stream_id}] Saved to {temp_path}")
+
+            # Play the file
+            self.process = subprocess.Popen(
+                ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', temp_path],
+                stdin=subprocess.DEVNULL
+            )
+
+            # Wait for ffplay to finish
+            while not self.stop_flag and self.process.poll() is None:
+                time.sleep(0.5)
+
+            print(f"[Audio {stream_id}] Playback finished")
+            return temp_path
 
         except Exception as e:
             print(f"AudioStreamer error: {e}")
-            return False
+            return None
         finally:
             self.cleanup()
-
-    def cleanup(self):
-        """Clean up resources safely"""
-        with self.lock:
-            # Kill ffplay process
-            if self.process:
+            if temp_path and os.path.exists(temp_path):
                 try:
-                    if self.process.stdin:
-                        self.process.stdin.close()
+                    os.remove(temp_path)
+                    print(f"[Audio {stream_id}] Removed temp file")
                 except:
                     pass
+
+    def cleanup(self):
+        with self.lock:
+            if self.process:
                 try:
                     self.process.terminate()
                     self.process.wait(timeout=2)
                 except:
                     pass
                 self.process = None
-            
-            # Close connection socket
+
             if self.conn:
                 try:
                     self.conn.close()
                 except:
                     pass
                 self.conn = None
-            
-            # Close listening socket
+
             if self.sock:
                 try:
                     self.sock.close()
@@ -144,11 +162,8 @@ class AudioStreamer:
                 self.sock = None
 
     def stop(self):
-        """Stop the streamer"""
         print(f"[Audio {self.stream_id}] Stop requested")
         self.stop_flag = True
-        # Don't call cleanup here - let the thread do it
-        # Just close the connection to break out of recv
         if self.conn:
             try:
                 self.conn.shutdown(socket.SHUT_RDWR)
@@ -180,9 +195,6 @@ class PowerampApp:
         self.setup_ui()
         self.root.after(500, self.get_song_and_folder)
 
-    # ------------------------------------------------------------
-    # Styling
-    # ------------------------------------------------------------
     def setup_styles(self):
         style = ttk.Style()
         try:
@@ -197,160 +209,55 @@ class PowerampApp:
         style.configure("TFrame", background=COL_BG)
         style.configure("TLabel", background=COL_BG, foreground=COL_TEXT, font=default_font)
 
-        style.configure(
-            "TLabelframe",
-            background=COL_PANEL,
-            foreground=COL_TEXT,
-            borderwidth=1,
-            relief="flat",
-        )
-        style.configure(
-            "TLabelframe.Label",
-            background=COL_PANEL,
-            foreground=COL_ACCENT_DARK,
-            font=bold_font,
-        )
+        style.configure("TLabelframe", background=COL_PANEL, foreground=COL_TEXT, borderwidth=1, relief="flat")
+        style.configure("TLabelframe.Label", background=COL_PANEL, foreground=COL_ACCENT_DARK, font=bold_font)
 
-        style.configure(
-            "Pill.TButton",
-            background=COL_ACCENT,
-            foreground="#ffffff",
-            font=("Segoe UI", 10, "bold"),
-            borderwidth=0,
-            focusthickness=0,
-            focuscolor=COL_ACCENT,
-            padding=(14, 8),
-            relief="flat",
-        )
-        style.map(
-            "Pill.TButton",
-            background=[("active", COL_ACCENT_DARK), ("pressed", COL_ACCENT_DARK)],
-        )
+        style.configure("Pill.TButton", background=COL_ACCENT, foreground="#ffffff", font=("Segoe UI", 10, "bold"),
+                        borderwidth=0, focusthickness=0, focuscolor=COL_ACCENT, padding=(14, 8), relief="flat")
+        style.map("Pill.TButton", background=[("active", COL_ACCENT_DARK), ("pressed", COL_ACCENT_DARK)])
 
-        style.configure(
-            "Accent.TButton",
-            background=COL_ACCENT_DARK,
-            foreground="#ffffff",
-            font=("Segoe UI", 10, "bold"),
-            borderwidth=0,
-            focusthickness=0,
-            focuscolor=COL_ACCENT_DARK,
-            padding=(16, 8),
-            relief="flat",
-        )
-        style.map(
-            "Accent.TButton",
-            background=[("active", "#db0f8b"), ("pressed", "#db0f8b")],
-        )
+        style.configure("Accent.TButton", background=COL_ACCENT_DARK, foreground="#ffffff", font=("Segoe UI", 10, "bold"),
+                        borderwidth=0, focusthickness=0, focuscolor=COL_ACCENT_DARK, padding=(16, 8), relief="flat")
+        style.map("Accent.TButton", background=[("active", "#db0f8b"), ("pressed", "#db0f8b")])
 
-        style.configure(
-            "Danger.TButton",
-            background="#d44c7a",
-            foreground="#ffffff",
-            font=("Segoe UI", 10, "bold"),
-            borderwidth=0,
-            focusthickness=0,
-            focuscolor="#d44c7a",
-            padding=(14, 8),
-            relief="flat",
-        )
-        style.map(
-            "Danger.TButton",
-            background=[("active", "#c41e6a"), ("pressed", "#c41e6a")],
-        )
+        style.configure("Danger.TButton", background="#d44c7a", foreground="#ffffff", font=("Segoe UI", 10, "bold"),
+                        borderwidth=0, focusthickness=0, focuscolor="#d44c7a", padding=(14, 8), relief="flat")
+        style.map("Danger.TButton", background=[("active", "#c41e6a"), ("pressed", "#c41e6a")])
 
-        style.configure(
-            "Nav.TButton",
-            background=COL_ACCENT,
-            foreground="#ffffff",
-            font=("Segoe UI", 12, "bold"),
-            borderwidth=0,
-            focusthickness=0,
-            focuscolor=COL_ACCENT,
-            padding=(10, 6),
-            relief="flat",
-        )
-        style.map(
-            "Nav.TButton",
-            background=[("active", COL_ACCENT_DARK), ("pressed", COL_ACCENT_DARK)],
-        )
+        style.configure("Nav.TButton", background=COL_ACCENT, foreground="#ffffff", font=("Segoe UI", 12, "bold"),
+                        borderwidth=0, focusthickness=0, focuscolor=COL_ACCENT, padding=(10, 6), relief="flat")
+        style.map("Nav.TButton", background=[("active", COL_ACCENT_DARK), ("pressed", COL_ACCENT_DARK)])
 
-        style.configure(
-            "TCheckbutton",
-            background=COL_BG,
-            foreground=COL_SUBTEXT,
-            font=default_font,
-        )
-        style.map(
-            "TCheckbutton",
-            foreground=[("active", COL_TEXT)],
-        )
+        style.configure("TCheckbutton", background=COL_BG, foreground=COL_SUBTEXT, font=default_font)
+        style.map("TCheckbutton", foreground=[("active", COL_TEXT)])
 
-        style.configure(
-            "Accent.Horizontal.TProgressbar",
-            troughcolor=COL_PANEL_LIGHT,
-            background=COL_ACCENT,
-            borderwidth=0,
-            lightcolor=COL_ACCENT,
-            darkcolor=COL_ACCENT,
-            thickness=14,
-        )
+        style.configure("Accent.Horizontal.TProgressbar", troughcolor=COL_PANEL_LIGHT, background=COL_ACCENT,
+                        borderwidth=0, lightcolor=COL_ACCENT, darkcolor=COL_ACCENT, thickness=14)
 
-    # ------------------------------------------------------------
-    # UI layout
-    # ------------------------------------------------------------
     def setup_ui(self):
         main_frame = ttk.Frame(self.root, padding="12")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.status_label = ttk.Label(
-            main_frame,
-            text="Status: Auto-loading...",
-            foreground=COL_WARNING,
-            font=("Segoe UI", 11, "bold"),
-        )
+        self.status_label = ttk.Label(main_frame, text="Status: Auto-loading...", foreground=COL_WARNING,
+                                      font=("Segoe UI", 11, "bold"))
         self.status_label.pack(anchor=tk.W, pady=(0, 8))
 
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(pady=5, fill=tk.X)
 
-        ttk.Button(
-            btn_frame, text="Get Current Song & Folder",
-            style="Pill.TButton", command=self.get_song_and_folder
-        ).pack(side=tk.LEFT, padx=4)
-
-        ttk.Button(
-            btn_frame, text="▶ Play",
-            style="Accent.TButton", command=self.play_song
-        ).pack(side=tk.LEFT, padx=4)
-
-        ttk.Button(
-            btn_frame, text="■ Stop",
-            style="Danger.TButton", command=self.stop_song
-        ).pack(side=tk.LEFT, padx=4)
-
-        ttk.Button(
-            btn_frame, text="⏮", width=3,
-            style="Nav.TButton", command=self.prev_song
-        ).pack(side=tk.LEFT, padx=(16, 2))
-
-        ttk.Button(
-            btn_frame, text="⏭", width=3,
-            style="Nav.TButton", command=self.next_song
-        ).pack(side=tk.LEFT, padx=2)
-
-        ttk.Checkbutton(
-            btn_frame, text="Auto-advance", variable=self.auto_advance
-        ).pack(side=tk.LEFT, padx=16)
+        ttk.Button(btn_frame, text="Get Current Song & Folder", style="Pill.TButton",
+                   command=self.get_song_and_folder).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="▶ Play", style="Accent.TButton", command=self.play_song).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="■ Stop", style="Danger.TButton", command=self.stop_song).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="⏮", width=3, style="Nav.TButton", command=self.prev_song).pack(side=tk.LEFT, padx=(16, 2))
+        ttk.Button(btn_frame, text="⏭", width=3, style="Nav.TButton", command=self.next_song).pack(side=tk.LEFT, padx=2)
+        ttk.Checkbutton(btn_frame, text="Auto-advance", variable=self.auto_advance).pack(side=tk.LEFT, padx=16)
 
         progress_frame = ttk.LabelFrame(main_frame, text="Stream Progress", padding="10")
         progress_frame.pack(fill=tk.X, pady=8)
 
-        self.progress_bar = ttk.Progressbar(
-            progress_frame, mode='determinate', style="Accent.Horizontal.TProgressbar"
-        )
+        self.progress_bar = ttk.Progressbar(progress_frame, mode='determinate', style="Accent.Horizontal.TProgressbar")
         self.progress_bar.pack(fill=tk.X, pady=4)
-
         self.progress_label = ttk.Label(progress_frame, text="Waiting...", foreground=COL_SUBTEXT)
         self.progress_label.pack(pady=2)
 
@@ -363,40 +270,39 @@ class PowerampApp:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.playlist_box = tk.Listbox(
-            list_frame, yscrollcommand=scrollbar.set, font=("Consolas", 9),
-            bg=COL_PANEL_LIGHT, fg=COL_TEXT, selectbackground=COL_ACCENT,
-            selectforeground="#ffffff", borderwidth=0, highlightthickness=0,
-            activestyle="none",
-        )
+        self.playlist_box = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=("Consolas", 9),
+                                       bg=COL_PANEL_LIGHT, fg=COL_TEXT, selectbackground=COL_ACCENT,
+                                       selectforeground="#ffffff", borderwidth=0, highlightthickness=0, activestyle="none")
         self.playlist_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.playlist_box.yview)
-
         self.playlist_box.bind('<Double-Button-1>', self.on_playlist_double_click)
 
         song_frame = ttk.LabelFrame(main_frame, text="Current Song", padding="10")
         song_frame.pack(fill=tk.X, pady=5)
 
-        self.song_text = tk.Text(
-            song_frame, height=2, wrap=tk.WORD,
-            bg=COL_PANEL_LIGHT, fg=COL_TEXT, insertbackground=COL_TEXT,
-            borderwidth=0, highlightthickness=0, font=("Consolas", 10),
-        )
+        self.song_text = tk.Text(song_frame, height=2, wrap=tk.WORD, bg=COL_PANEL_LIGHT, fg=COL_TEXT,
+                                 insertbackground=COL_TEXT, borderwidth=0, highlightthickness=0, font=("Consolas", 10))
         self.song_text.pack(fill=tk.X)
 
         console_frame = ttk.LabelFrame(main_frame, text="Console", padding="10")
         console_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.console = scrolledtext.ScrolledText(
-            console_frame, height=8, font=("Consolas", 9),
-            bg=COL_PANEL_LIGHT, fg=COL_SUBTEXT, insertbackground=COL_TEXT,
-            borderwidth=0, highlightthickness=0,
-        )
+        self.console = scrolledtext.ScrolledText(console_frame, height=8, font=("Consolas", 9),
+                                                 bg=COL_PANEL_LIGHT, fg=COL_SUBTEXT, insertbackground=COL_TEXT,
+                                                 borderwidth=0, highlightthickness=0)
         self.console.pack(fill=tk.BOTH, expand=True)
 
     def log(self, msg):
-        self.console.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        self.console.see(tk.END)
+        def _do_log():
+            self.console.insert(tk.END, f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+            self.console.see(tk.END)
+        try:
+            if threading.current_thread() is threading.main_thread():
+                _do_log()
+            else:
+                self.root.after(0, _do_log)
+        except Exception:
+            pass
 
     def update_progress(self, mb, stream_id):
         if stream_id != self.stream_generation:
@@ -407,7 +313,6 @@ class PowerampApp:
         self.progress_bar['value'] = percent
 
     def clean_filename(self, filename):
-        """Remove all control characters, newlines, and trim whitespace from filename"""
         if not filename:
             return ""
         filename = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', filename)
@@ -416,25 +321,18 @@ class PowerampApp:
         return filename
 
     def send_telnet_command(self, cmd):
-        """Send command directly to Android via telnet and get response"""
         sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(10)
             sock.connect((ANDROID_HOST, ANDROID_PORT))
-            
-            # Wait for initial prompt and clear it
             time.sleep(0.5)
             try:
                 sock.recv(4096)
             except:
                 pass
-            
-            # Send command
             sock.send(f"{cmd}\n".encode())
             time.sleep(1)
-            
-            # Get response
             response = b''
             sock.settimeout(2)
             try:
@@ -447,9 +345,7 @@ class PowerampApp:
                         break
             except socket.timeout:
                 pass
-            
             return response.decode('utf-8', errors='ignore')
-            
         except Exception as e:
             self.log(f"Telnet error: {e}")
             return ""
@@ -460,19 +356,34 @@ class PowerampApp:
                 except:
                     pass
 
+    def _get_poweramp_pid(self):
+        response = self.send_telnet_command('su -c "pidof com.maxmpz.audioplayer"')
+        cleaned = self.clean_filename(response)
+        match = re.search(r'\d+', cleaned)
+        if match:
+            return match.group(0)
+        return None
+
     def get_song_and_folder(self):
         self.status_label.config(text="Status: Getting song and folder...", foreground=COL_WARNING)
         threading.Thread(target=self._get_song_and_folder, daemon=True).start()
 
     def _get_song_and_folder(self):
         try:
+            self.log("Getting Poweramp PID...")
+            pid = self._get_poweramp_pid()
+            if not pid:
+                self.log("Could not find Poweramp PID")
+                self.status_label.config(text="Status: No PID", foreground=COL_ERROR)
+                return
+
+            self.log(f"Poweramp PID: {pid}")
             self.log("Getting current song path...")
             response = self.send_telnet_command(
-                'su -c "ls -la /proc/20392/fd/ 2>/dev/null | grep /mobile/ | sed \'s/.*-> //\' | tail -1"'
+                f'su -c "ls -la /proc/{pid}/fd/ 2>/dev/null | grep /mobile/ | sed \'s/.*-> //\' | tail -1"'
             )
-
             response = self.clean_filename(response)
-            
+
             start = response.find('/storage/')
             if start != -1:
                 end = response.find('.mp3', start)
@@ -523,14 +434,33 @@ class PowerampApp:
             self.log(f"ERROR: {e}")
             self.status_label.config(text="Status: Error", foreground=COL_ERROR)
 
-    def play_song(self):
-        with self.playing_lock:
-            if not self.current_song_path:
-                self.log("No song loaded. Click 'Get Current Song & Folder' first.")
-                return
+    def _wait_for_receiver_stop(self, timeout=5):
+        if self.active_stream_thread and self.active_stream_thread.is_alive():
+            self.active_stream_thread.join(timeout=timeout)
 
-            self.progress_bar['value'] = 0
-            self.progress_label.config(text="Starting...")
+    def _do_stop_current_stream(self):
+        """Stop current stream. Must be called WITH playing_lock held."""
+        if self.streamer:
+            old = self.streamer
+            self.streamer = None
+            old.stop()
+            self.playing_lock.release()
+            try:
+                self._wait_for_receiver_stop(timeout=3)
+                time.sleep(0.5)
+            finally:
+                self.playing_lock.acquire()
+
+    def play_song(self):
+        if not self.current_song_path:
+            self.log("No song loaded. Click 'Get Current Song & Folder' first.")
+            return
+        threading.Thread(target=self._play_song_worker, daemon=True).start()
+
+    def _play_song_worker(self):
+        with self.playing_lock:
+            self.root.after(0, lambda: self.progress_bar.configure(value=0))
+            self.root.after(0, lambda: self.progress_label.config(text="Starting..."))
 
             self.stream_generation += 1
             my_gen = self.stream_generation
@@ -538,11 +468,15 @@ class PowerampApp:
 
             if self.streamer:
                 self.log("Stopping previous stream...")
-                old_streamer = self.streamer
+                old = self.streamer
                 self.streamer = None
-                old_streamer.stop()
-                # Give it time to fully stop
-                time.sleep(1.5)
+                old.stop()
+                self.playing_lock.release()
+                try:
+                    self._wait_for_receiver_stop(timeout=3)
+                    time.sleep(0.5)
+                finally:
+                    self.playing_lock.acquire()
 
             self.log(f"Starting audio receiver (stream {my_gen})...")
             self.streamer = AudioStreamer()
@@ -554,31 +488,43 @@ class PowerampApp:
                 except Exception as e:
                     self.log(f"Receiver error: {e}")
                 finally:
-                    self.root.after(100, self.on_song_ended, my_gen)
+                    self.root.after(100, lambda: self.on_song_ended(my_gen))
 
             self.active_stream_thread = threading.Thread(target=run_receiver, daemon=True)
             self.active_stream_thread.start()
 
-            # Wait for receiver to be ready
-            time.sleep(2)
+            # Wait for receiver to be listening
+            ready = False
+            for _ in range(50):
+                if self.streamer and self.streamer.sock:
+                    try:
+                        self.streamer.sock.getsockname()
+                        ready = True
+                        break
+                    except:
+                        pass
+                time.sleep(0.1)
+
+            if not ready:
+                self.log("ERROR: Receiver did not start in time!")
+                self.root.after(0, lambda: self.status_label.config(text="Status: Receiver failed", foreground=COL_ERROR))
+                self.streamer = None
+                return
 
             clean_filename = self.clean_filename(self.current_song_path.split('/')[-1])
             self.log(f"Streaming: {clean_filename} (stream {my_gen})")
-            
-            # Escape single quotes in filename
+
             escaped_filename = clean_filename.replace("'", "'\\''")
             cmd = f"cat '{self.current_folder}{escaped_filename}' | nc {WINDOWS_IP} {AUDIO_STREAM_PORT}"
 
-            def send_stream():
-                try:
-                    self.send_telnet_command(cmd)
-                except Exception as e:
-                    self.log(f"Stream send error: {e}")
-
-            threading.Thread(target=send_stream, daemon=True).start()
-
             self.is_playing = True
-            self.status_label.config(text="Status: Playing", foreground=COL_SUCCESS)
+            self.root.after(0, lambda: self.status_label.config(text="Status: Playing", foreground=COL_SUCCESS))
+
+        # Send command OUTSIDE lock so we don't block
+        try:
+            self.send_telnet_command(cmd)
+        except Exception as e:
+            self.log(f"Stream send error: {e}")
 
     def on_song_ended(self, gen):
         if gen != self.stream_generation:
@@ -591,34 +537,46 @@ class PowerampApp:
                 self.log(f"Song ended - Total: {mb:.2f} MB")
             else:
                 self.log("Song ended")
-            
+
             self.progress_bar['value'] = 0
             self.progress_label.config(text="Complete")
             self.current_mb = 0
             self.is_playing = False
             self.streamer = None
 
-            if gen == self.stream_generation and self.auto_advance.get():
-                self.log("Auto-advancing...")
-                self.root.after(500, self._safe_next_song)
+            should_advance = (gen == self.stream_generation and self.auto_advance.get())
+
+        if should_advance:
+            self.log("Auto-advancing...")
+            self.root.after(500, self._safe_next_song)
 
     def _safe_next_song(self):
         with self.playing_lock:
-            if self.auto_advance.get() and not self.is_playing:
-                self.next_song()
+            should_advance = self.auto_advance.get() and not self.is_playing
+        if should_advance:
+            self.next_song()
 
     def play_song_at_index(self, index):
         with self.playing_lock:
             if index < 0 or index >= len(self.playlist):
                 self.log("End of playlist reached")
-                self.stop_song()
+                self.playing_lock.release()
+                try:
+                    self.stop_song()
+                finally:
+                    self.playing_lock.acquire()
                 return False
 
             if self.streamer:
-                old_streamer = self.streamer
+                old = self.streamer
                 self.streamer = None
-                old_streamer.stop()
-                time.sleep(1)
+                old.stop()
+                self.playing_lock.release()
+                try:
+                    self._wait_for_receiver_stop(timeout=3)
+                    time.sleep(0.5)
+                finally:
+                    self.playing_lock.acquire()
 
             self.playlist_index = index
             clean_song = self.clean_filename(self.playlist[index])
@@ -655,13 +613,19 @@ class PowerampApp:
     def stop_song(self):
         with self.playing_lock:
             self.stream_generation += 1
-            
+
             if self.streamer:
-                self.streamer.stop()
+                old = self.streamer
                 self.streamer = None
+                old.stop()
+                self.playing_lock.release()
+                try:
+                    self._wait_for_receiver_stop(timeout=3)
+                finally:
+                    self.playing_lock.acquire()
             self.is_playing = False
             self.current_mb = 0
-            
+
         self.status_label.config(text="Status: Stopped", foreground=COL_INFO)
         self.log("Stopped")
         self.progress_bar['value'] = 0
