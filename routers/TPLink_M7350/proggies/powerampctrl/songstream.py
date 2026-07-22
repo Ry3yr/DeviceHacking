@@ -8,10 +8,11 @@ import subprocess
 import re
 import tempfile
 import os
+import sys
 
-ANDROID_HOST = "192.168.0.190"
+ANDROID_HOST = os.environ.get("ANDROID_HOST_OVERRIDE", "192.168.0.190")
 ANDROID_PORT = 8023
-WINDOWS_IP = "192.168.0.122"
+WINDOWS_IP = os.environ.get("WINDOWS_IP_OVERRIDE", "192.168.0.122")
 AUDIO_STREAM_PORT = 12345
 
 COL_BG = "#fff5f7"
@@ -191,8 +192,18 @@ class PowerampApp:
         self.active_stream_thread = None
         self.playing_lock = threading.Lock()
 
+        self.android_ip_var = tk.StringVar(value=ANDROID_HOST)
+        self.windows_ip_var = tk.StringVar(value=WINDOWS_IP)
+
+        self.ticker_enabled = tk.BooleanVar(value=False)
+        self.ticker_window = None
+        self.ticker_after_id = None
+        self.ticker_title_label = None
+        self.ticker_song_label = None
+
         self.setup_styles()
         self.setup_ui()
+        self.setup_bindings()
         self.root.after(500, self.get_song_and_folder)
 
     def setup_styles(self):
@@ -238,6 +249,21 @@ class PowerampApp:
         main_frame = ttk.Frame(self.root, padding="12")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # --- Address override panel (Ctrl+1 / Ctrl+2 to focus) ---
+        addr_frame = ttk.LabelFrame(main_frame, text="Connection Addresses", padding="10")
+        addr_frame.pack(fill=tk.X, pady=(0, 8))
+
+        ttk.Label(addr_frame, text="Android IP (Ctrl+1):").grid(row=0, column=0, sticky=tk.W, padx=(0, 6), pady=4)
+        self.android_ip_entry = ttk.Entry(addr_frame, textvariable=self.android_ip_var, width=18)
+        self.android_ip_entry.grid(row=0, column=1, sticky=tk.W, padx=(0, 16), pady=4)
+
+        ttk.Label(addr_frame, text="Windows IP (Ctrl+2):").grid(row=0, column=2, sticky=tk.W, padx=(0, 6), pady=4)
+        self.windows_ip_entry = ttk.Entry(addr_frame, textvariable=self.windows_ip_var, width=18)
+        self.windows_ip_entry.grid(row=0, column=3, sticky=tk.W, padx=(0, 16), pady=4)
+
+        ttk.Button(addr_frame, text="Restart script with new addresses", style="Pill.TButton",
+                   command=self.restart_with_new_addresses).grid(row=0, column=4, sticky=tk.W, pady=4)
+
         self.status_label = ttk.Label(main_frame, text="Status: Auto-loading...", foreground=COL_WARNING,
                                       font=("Segoe UI", 11, "bold"))
         self.status_label.pack(anchor=tk.W, pady=(0, 8))
@@ -252,6 +278,7 @@ class PowerampApp:
         ttk.Button(btn_frame, text="⏮", width=3, style="Nav.TButton", command=self.prev_song).pack(side=tk.LEFT, padx=(16, 2))
         ttk.Button(btn_frame, text="⏭", width=3, style="Nav.TButton", command=self.next_song).pack(side=tk.LEFT, padx=2)
         ttk.Checkbutton(btn_frame, text="Auto-advance", variable=self.auto_advance).pack(side=tk.LEFT, padx=16)
+        ttk.Checkbutton(btn_frame, text="Ticker", variable=self.ticker_enabled).pack(side=tk.LEFT, padx=8)
 
         progress_frame = ttk.LabelFrame(main_frame, text="Stream Progress", padding="10")
         progress_frame.pack(fill=tk.X, pady=8)
@@ -291,6 +318,117 @@ class PowerampApp:
                                                  bg=COL_PANEL_LIGHT, fg=COL_SUBTEXT, insertbackground=COL_TEXT,
                                                  borderwidth=0, highlightthickness=0)
         self.console.pack(fill=tk.BOTH, expand=True)
+
+    def setup_bindings(self):
+        # Ctrl+1 / Ctrl+2 focus the address textboxes
+        self.root.bind_all("<Control-Key-1>", lambda e: self.android_ip_entry.focus_set())
+        self.root.bind_all("<Control-Key-2>", lambda e: self.windows_ip_entry.focus_set())
+
+        # Media keys: play/pause toggles play/stop, next/previous move in playlist
+        media_bindings = {
+            "<XF86AudioPlay>": lambda e: self.toggle_play_pause(),
+            "<XF86AudioPause>": lambda e: self.toggle_play_pause(),
+            "<XF86AudioNext>": lambda e: self.next_song(),
+            "<XF86AudioPrev>": lambda e: self.prev_song(),
+            "<MediaPlayPause>": lambda e: self.toggle_play_pause(),
+            "<MediaNextTrack>": lambda e: self.next_song(),
+            "<MediaPreviousTrack>": lambda e: self.prev_song(),
+        }
+        for keysym, handler in media_bindings.items():
+            try:
+                self.root.bind_all(keysym, handler)
+            except tk.TclError:
+                pass
+
+    def restart_with_new_addresses(self):
+        android_ip = self.android_ip_var.get().strip()
+        windows_ip = self.windows_ip_var.get().strip()
+        if not android_ip or not windows_ip:
+            self.log("Please enter both IP addresses before restarting.")
+            return
+
+        self.log(f"Restarting with Android IP={android_ip}, Windows IP={windows_ip}...")
+
+        try:
+            if self.streamer:
+                self.streamer.stop()
+        except Exception:
+            pass
+
+        env = os.environ.copy()
+        env["ANDROID_HOST_OVERRIDE"] = android_ip
+        env["WINDOWS_IP_OVERRIDE"] = windows_ip
+
+        python = sys.executable
+        args = [python] + sys.argv
+        os.execve(python, args, env)
+
+    def toggle_play_pause(self):
+        if self.is_playing:
+            self.stop_song()
+        else:
+            self.play_song()
+
+    def show_ticker(self, song_name):
+        if not self.ticker_enabled.get():
+            return
+
+        if self.ticker_after_id:
+            try:
+                self.root.after_cancel(self.ticker_after_id)
+            except Exception:
+                pass
+            self.ticker_after_id = None
+
+        if self.ticker_window is None or not self.ticker_window.winfo_exists():
+            self.ticker_window = tk.Toplevel(self.root)
+            self.ticker_window.overrideredirect(True)
+            try:
+                self.ticker_window.attributes("-topmost", True)
+            except Exception:
+                pass
+            try:
+                self.ticker_window.attributes("-alpha", 0.95)
+            except Exception:
+                pass
+            self.ticker_window.configure(bg=COL_ACCENT_DARK)
+
+            frame = tk.Frame(self.ticker_window, bg=COL_ACCENT_DARK, padx=12, pady=8)
+            frame.pack()
+
+            self.ticker_title_label = tk.Label(frame, text="Now Playing", bg=COL_ACCENT_DARK, fg="#ffffff",
+                                               font=("Segoe UI", 8, "bold"))
+            self.ticker_title_label.pack(anchor=tk.W)
+
+            self.ticker_song_label = tk.Label(frame, text="", bg=COL_ACCENT_DARK, fg="#ffffff",
+                                              font=("Segoe UI", 10, "bold"), wraplength=280, justify=tk.LEFT)
+            self.ticker_song_label.pack(anchor=tk.W)
+        else:
+            self.ticker_window.deiconify()
+
+        self.ticker_song_label.config(text=song_name)
+        self.ticker_window.update_idletasks()
+        self._position_ticker()
+        self.ticker_window.lift()
+
+        self.ticker_after_id = self.root.after(4000, self._hide_ticker)
+
+    def _position_ticker(self):
+        if not self.ticker_window or not self.ticker_window.winfo_exists():
+            return
+        self.ticker_window.update_idletasks()
+        w = self.ticker_window.winfo_width()
+        h = self.ticker_window.winfo_height()
+        screen_w = self.ticker_window.winfo_screenwidth()
+        screen_h = self.ticker_window.winfo_screenheight()
+        x = screen_w - w - 20
+        y = screen_h - h - 60
+        self.ticker_window.geometry(f"+{x}+{y}")
+
+    def _hide_ticker(self):
+        self.ticker_after_id = None
+        if self.ticker_window and self.ticker_window.winfo_exists():
+            self.ticker_window.withdraw()
 
     def log(self, msg):
         def _do_log():
@@ -513,6 +651,7 @@ class PowerampApp:
 
             clean_filename = self.clean_filename(self.current_song_path.split('/')[-1])
             self.log(f"Streaming: {clean_filename} (stream {my_gen})")
+            self.root.after(0, lambda: self.show_ticker(clean_filename))
 
             escaped_filename = clean_filename.replace("'", "'\\''")
             cmd = f"cat '{self.current_folder}{escaped_filename}' | nc {WINDOWS_IP} {AUDIO_STREAM_PORT}"
